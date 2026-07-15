@@ -254,20 +254,23 @@ pub fn column_counts_aat_scratch<I: Index>(
 /// - `col_counts` has length `A.ncols()`
 /// - `min_col` has length `A.nrows()`
 /// - `col_perm` has length `A.ncols()`: fill reducing permutation
-/// - `etree` has length `A.ncols()`: column elimination tree of $A A^\top$
+/// - `etree` has length `A.ncols()`: column elimination tree of $A^\top A$
 /// - `post` has length `A.ncols()`: postordering of `etree`
 ///
-/// # warning
-/// the function takes as input `A.transpose()`, not `A`
+/// the matrix is taken in row-major form (`A`, not `A.transpose()`), so there
+/// is no ambiguity about which orientation to pass
 pub fn column_counts_ata<'m, 'n, I: Index>(
 	col_counts: &mut [I],
 	min_col: &mut [I],
-	AT: SymbolicSparseColMatRef<'_, I>,
+	A: SymbolicSparseRowMatRef<'_, I>,
 	col_perm: Option<PermRef<'_, I>>,
 	etree: EliminationTreeRef<'_, I>,
 	post: &[I],
 	stack: &mut MemStack,
 ) {
+	// the underlying algorithm consumes `A^\top` in column-major form, which is
+	// exactly `A` viewed row-major transposed — a zero-cost relabeling.
+	let AT = A.transpose();
 	with_dim!(M, AT.nrows());
 	with_dim!(N, AT.ncols());
 	let A = AT.as_shape(M, N);
