@@ -1,13 +1,16 @@
 [package]
-name = "faer-traits"
+name = "faier-traits"
 version = "0.24.0"
 edition = "2021"
 authors = ["sarah quiñones <sarah@veganb.tw>"]
-description = "linear algebra library"
+description = "linear algebra library — maintained fork of faer with AI-assisted fixes"
 readme = "../README.md"
-repository = "https://codeberg.org/sarah-quinones/faer"
+repository = "https://github.com/rjwalters/faier"
 license = "MIT"
 keywords = ["math", "linear-algebra"]
+
+[lib]
+name = "faer_traits"
 
 [dependencies]
 bytemuck = "1.24.0"

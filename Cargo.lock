@@ -823,7 +823,25 @@ dependencies = [
 ]
 
 [[package]]
-name = "faer"
+name = "faer-ffi"
+version = "0.1.0"
+dependencies = [
+ "cbindgen",
+ "faier",
+ "pastey",
+]
+
+[[package]]
+name = "faer-macros"
+version = "0.22.1"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.111",
+]
+
+[[package]]
+name = "faier"
 version = "0.24.4"
 dependencies = [
  "aligned-vec",
@@ -837,7 +855,7 @@ dependencies = [
  "dyn-stack",
  "eigen-bench-setup",
  "equator 0.6.0",
- "faer-traits",
+ "faier-traits",
  "flate2",
  "gemm",
  "generativity",
@@ -874,25 +892,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "faer-ffi"
-version = "0.1.0"
-dependencies = [
- "cbindgen",
- "faer",
- "pastey",
-]
-
-[[package]]
-name = "faer-macros"
-version = "0.22.1"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.111",
-]
-
-[[package]]
-name = "faer-traits"
+name = "faier-traits"
 version = "0.24.0"
 dependencies = [
  "bytemuck",

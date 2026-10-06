@@ -1,3 +1,21 @@
+# faier — faer, with AI-assisted fixes
+
+**About this fork.** `faier` is a maintained fork of [faer](https://github.com/sarah-quinones/faer-rs) by Sarah Quiñones, used by [geode-fem](https://github.com/rjwalters/geode-fem) and related projects. Upstream does not accept contributions written with AI assistance. Our development uses AI tools, so fixes we need cannot go upstream, and we carry them here instead.
+
+- **Same API.** The crate is published as `faier`, but the library name is still `faer`, so existing code keeps `use faer::...`. Depend on it with a package rename:
+
+  ```toml
+  faer = { package = "faier", version = "0.24.4" }
+  ```
+
+- **Tracks upstream.** The fork follows upstream releases and adds a small set of fixes, each listed in [`FORK.md`](FORK.md) with the issue it resolves.
+- **License and credit.** faer is MIT-licensed. The original copyright, license and third-party notices are retained, and all credit for faer itself belongs to its author.
+- **Report fork bugs here,** at [rjwalters/faier](https://github.com/rjwalters/faier/issues), not upstream.
+
+The upstream README follows.
+
+---
+
 <p align="center">
   <img src="https://faer.veganb.tw/faer-logo-color.png" alt="faer logo"/ width="25%">
 </p>
