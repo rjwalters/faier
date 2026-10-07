@@ -27,17 +27,70 @@ pub(crate) fn make_givens<T: ComplexField>(f: T, g: T) -> (T::Real, T, T) {
 		let c = zero::<T::Real>();
 		let d = g.abs();
 		let d_inv = d.recip();
+		if !d_inv.is_finite() {
+			// `|g|` is far down in the subnormal range
+			let big = sqrt_max_positive::<T::Real>();
+			let (c, s, r) = make_givens(f, g.mul_real(&big));
+			return (c, s, r.mul_real(big.recip()));
+		}
 		let s = g.conj().mul_real(&d_inv);
 		let r = d.to_cplx();
 		(c, s, r)
 	} else {
+		// `c = |f| / h`, `s = sgn(f) conj(g) / h`, `r = sgn(f) h`, with
+		// `h = hypot(|f|, |g|)` and `sgn(f) = f / |f|`.
+		//
+		// the direct (upstream) form below divides by `h` twice and by `c`.
+		// `1 / h` and `1 / c` overflow once `h` or `c` drops below
+		// `1 / max_positive` (subnormal inputs, or `|f| << |g|`), which made
+		// `s` and `r` non-finite and turned the QZ iterates into NaN. it is
+		// kept, bit for bit, where `h` and `c` are safely in range; otherwise
+		// the inputs are first scaled by `1 / max(|f|, |g|)` so that every
+		// intermediate is O(1)
+		{
+			let f1 = f.abs();
+			let g1 = g.abs();
+			let h1 = f1.hypot(g1);
+			let rtmin = sqrt_min_positive::<T::Real>();
+			let rtmax = sqrt_max_positive::<T::Real>();
+			if h1 > rtmin && h1 < rtmax {
+				let ref h1_inv = h1.recip();
+				let c = f1 * h1_inv;
+				if c > rtmin {
+					let r = f.mul_real(c.recip());
+					let s = g.conj() * r.mul_real(h1_inv).mul_real(h1_inv);
+					return (c, s, r);
+				}
+			}
+		}
 		let f1 = f.abs();
 		let g1 = g.abs();
-		let h1 = f1.hypot(g1);
-		let ref h1_inv = h1.recip();
-		let c = f1 * h1_inv;
-		let r = f.mul_real(c.recip());
-		let s = g.conj() * r.mul_real(h1_inv).mul_real(h1_inv);
+		let u = f1.fmax(&g1);
+		let u_inv = u.recip();
+		if !u_inv.is_finite() {
+			// `u` is far down in the subnormal range: rescale by a large
+			// constant and retry, then undo the scaling of `r`
+			let big = sqrt_max_positive::<T::Real>();
+			let (c, s, r) = make_givens(f.mul_real(&big), g.mul_real(&big));
+			return (c, s, r.mul_real(big.recip()));
+		}
+		let fs = f.mul_real(&u_inv);
+		let gs = g.mul_real(&u_inv);
+		let f1s = f1 * &u_inv;
+		let g1s = g1 * &u_inv;
+		// `1 <= h <= sqrt(2)`
+		let h = f1s.hypot(g1s);
+		let h_inv = h.recip();
+		let c = &f1s * &h_inv;
+		// `sgn(f)`, guarding the reciprocal when `|f| << |g|`
+		let sgn = if f1s >= sqrt_min_positive::<T::Real>() {
+			fs.mul_real(f1s.recip())
+		} else {
+			let big = sqrt_max_positive::<T::Real>();
+			fs.mul_real(&big).mul_real((f1s * &big).recip())
+		};
+		let s = &sgn * gs.conj().mul_real(&h_inv);
+		let r = sgn.mul_real(h * u);
 		(c, s, r)
 	}
 }
@@ -902,5 +955,65 @@ mod tests {
 				}
 			}
 		}
+	}
+}
+#[cfg(test)]
+mod make_givens_tests {
+	use super::make_givens;
+	use crate::c64;
+
+	/// a few units in the last place of the subnormal range
+	const SUBNORMAL_FLOOR: f64 = 16.0 * 4.9e-324;
+
+	/// geode-fem #908 / #867: `make_givens` formed `1 / h` with
+	/// `h = hypot(|f|, |g|)` and `1 / c` with `c = |f| / h`. both overflow to
+	/// infinity once their argument drops below `1 / max_positive` (~5.6e-309,
+	/// in the subnormal range), which made `s` and `r` non-finite. in the
+	/// complex QZ, chaining shifts from a degenerate eigenvalue cluster drives
+	/// the bulge entries that far down, the iterates turned into NaN and the
+	/// blocked loop then ran out its `30 n` sweeps (an effective hang)
+	#[track_caller]
+	fn check_cplx(f: c64, g: c64) {
+		let (c, s, r) = make_givens(f, g);
+		assert!(c.is_finite() && s.re.is_finite() && s.im.is_finite());
+		assert!(r.re.is_finite() && r.im.is_finite());
+		let unit = c * c + s.norm_sqr();
+		assert!((unit - 1.0).abs() <= 8.0 * f64::EPSILON, "{f:?} {g:?}: {unit}");
+		// `[c, s; -conj(s), c] [f; g] = [r; 0]`, up to rounding (with an
+		// absolute floor for subnormal inputs)
+		let tol = 8.0 * f64::EPSILON * f.norm().max(g.norm()) + SUBNORMAL_FLOOR;
+		let top = f * c + s * g;
+		let bot = g * c - s.conj() * f;
+		assert!((top - r).norm() <= tol, "{f:?} {g:?}");
+		assert!(bot.norm() <= tol, "{f:?} {g:?}");
+	}
+
+	#[track_caller]
+	fn check_real(f: f64, g: f64) {
+		let (c, s, r) = make_givens(f, g);
+		assert!(c.is_finite() && s.is_finite() && r.is_finite());
+		let unit = c * c + s * s;
+		assert!((unit - 1.0).abs() <= 8.0 * f64::EPSILON, "{f} {g}: {unit}");
+		let tol = 8.0 * f64::EPSILON * f.abs().max(g.abs()) + SUBNORMAL_FLOOR;
+		assert!((f * c + s * g - r).abs() <= tol, "{f} {g}");
+		assert!((g * c - s * f).abs() <= tol, "{f} {g}");
+	}
+
+	#[test]
+	fn givens_is_finite_and_unitary_across_the_exponent_range() {
+		for scale in [1.0, 1e-140, 1e-160, 1e-200, 1e-300, 1e-310, 1e140, 1e160, 1e300]
+		{
+			check_cplx(c64::new(0.3, -0.4) * scale, c64::new(-1.2, 0.5) * scale);
+			check_cplx(c64::new(1.0, 0.0) * scale, c64::new(1e-30, 2e-30) * scale);
+			check_cplx(c64::new(1e-30, 0.0) * scale, c64::new(0.0, 1.0) * scale);
+			check_real(0.3 * scale, -1.2 * scale);
+			check_real(1e-30 * scale, 1.0 * scale);
+			check_real(-1.0 * scale, 1e-30 * scale);
+		}
+		// wildly different magnitudes
+		check_cplx(c64::new(1e-300, 1e-300), c64::new(1.0, 1.0));
+		check_cplx(c64::new(1.0, -1.0), c64::new(1e-300, 0.0));
+		check_real(1e-300, 1.0);
+		check_real(1.0, 1e-300);
 	}
 }
