@@ -10,3 +10,31 @@ updates:
       github-actions:
         patterns:
           - "*"
+
+  # Root workspace (faier, faier-traits, faer-macros, faer-ffi) only.
+  # lockfile-only: Dependabot refreshes Cargo.lock within the existing
+  # requirements and never rewrites Cargo.toml, so the fork's manifests stay
+  # identical to upstream faer and upstream syncs don't conflict on them.
+  # (Library consumers resolve against the Cargo.toml requirements, not this
+  # lockfile; it pins what CI and the release dry run build.)
+  # eigen-bench-setup (its own lockfile, never built standalone in CI) and
+  # faer-no-std-test (no lockfile) are deliberately not covered.
+  - package-ecosystem: cargo
+    directory: /
+    versioning-strategy: lockfile-only
+    schedule:
+      interval: weekly
+    groups:
+      cargo-minor-patch:
+        patterns:
+          - "*"
+        # SIMD / matmul-kernel crates change numerics and arch-specific code
+        # paths; each gets its own reviewable PR.
+        exclude-patterns:
+          - "pulp"
+          - "gemm*"
+          - "private-gemm-*"
+          - "nano-gemm*"
+        update-types:
+          - "minor"
+          - "patch"
