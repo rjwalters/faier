@@ -1,7 +1,6 @@
 on:
   push:
     branches:
-      - dev
       - main
   pull_request:
 
@@ -14,25 +13,23 @@ jobs:
 
     steps:
       - name: Checkout source
-        uses: actions/checkout@master
+        uses: actions/checkout@v4
 
+      # Pinned so a new nightly clippy/rustfmt cannot turn CI red on its own.
+      # This is the toolchain `cargo clippy --all-targets` was verified clean
+      # on (rustc 1.98.0-nightly cb46fbb8c 2026-06-08). Bump deliberately.
       - name: Install toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: nightly
-          components: clippy, rustfmt, rust-src, miri
+          toolchain: nightly-2026-06-09
+          components: clippy, rustfmt
 
+      # Non-gating for now: `cargo fmt --all -- --check` reports diffs in
+      # fork-added code (tracked in #9). Make it gate
+      # once the tree is formatted.
       - name: Formatting check
-        run:
-          cargo fmt --all -- --check &&
-          cd ./faer-entity &&
-          cargo fmt --all -- --check
-        # want to get all quality issues
+        run: cargo fmt --all -- --check
         continue-on-error: true
 
       - name: Linting check
-        run:
-          cargo clippy --all-targets &&
-          cd ./faer-entity &&
-          cargo clippy --all-targets
-        continue-on-error: true
+        run: cargo clippy --all-targets

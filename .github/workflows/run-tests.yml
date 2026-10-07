@@ -2,7 +2,6 @@ on:
   push:
     branches:
       - main
-      - refactor-3
   pull_request:
 
 name: Run Tests
@@ -22,13 +21,12 @@ jobs:
 
     steps:
       - name: Checkout source
-        uses: actions/checkout@master
+        uses: actions/checkout@v4
 
       - name: Install toolchain
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.toolchain }}
-          components: llvm-tools-preview
 
       - uses: Swatinem/rust-cache@v2
 
@@ -53,15 +51,16 @@ jobs:
 
     steps:
       - name: Checkout source
-        uses: actions/checkout@master
+        uses: actions/checkout@v4
 
       - name: Install toolchain
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.toolchain }}
-          components: llvm-tools-preview
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: faer-no-std-test
 
       - name: nostd
         run:
@@ -81,7 +80,7 @@ jobs:
 
     steps:
       - name: Checkout source
-        uses: actions/checkout@master
+        uses: actions/checkout@v4
 
       - name: Install toolchain
         uses: dtolnay/rust-toolchain@master
@@ -106,7 +105,17 @@ jobs:
       - name: Collect coverage data
         run: cd faer && cargo llvm-cov nextest --features=unstable --lcov --output-path ../lcov.info
 
+      # The fork has no CODECOV_TOKEN, so the upload is best-effort: it never
+      # fails the job. The lcov report is also kept as a workflow artifact.
       - name: Upload coverage data to codecov
-        uses: codecov/codecov-action@v3
+        uses: codecov/codecov-action@v5
         with:
           files: lcov.info
+          fail_ci_if_error: false
+        continue-on-error: true
+
+      - name: Upload lcov artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lcov
+          path: lcov.info
