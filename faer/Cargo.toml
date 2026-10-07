@@ -1,13 +1,15 @@
 [package]
 name = "faier"
-version = "0.24.4"
+version = "0.24.5"
 edition = "2021"
 authors = ["sarah quiñones <sarah@veganb.tw>"]
 description = "linear algebra library — maintained fork of faer with AI-assisted fixes"
 readme = "../README.md"
+documentation = "https://docs.rs/faier"
 repository = "https://github.com/rjwalters/faier"
 license = "MIT"
 keywords = ["math", "linear-algebra"]
+categories = ["mathematics", "science"]
 rust-version = "1.84.0"
 
 [lib]
