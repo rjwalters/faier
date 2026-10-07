@@ -1267,6 +1267,8 @@ pub trait ComplexField:
 	fn mul_real_impl(lhs: &Self, rhs: &Self::Real) -> Self;
 	fn mul_pow2_impl(lhs: &Self, rhs: &Self::Real) -> Self;
 	fn is_finite_impl(value: &Self) -> bool;
+	// NaN is the only value that compares unequal to itself.
+	#[allow(clippy::eq_op)]
 	fn is_nan_impl(value: &Self) -> bool {
 		value != value
 	}
