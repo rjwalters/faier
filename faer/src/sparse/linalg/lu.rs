@@ -1791,6 +1791,36 @@ pub struct LuSymbolicParams<'a> {
 	/// supernodal factorization parameters
 	pub supernodal_params: SymbolicSupernodalParams<'a>,
 }
+/// the fill-reducing column ordering used by the sparse $LU$ symbolic
+/// factorization
+///
+/// this mirrors [`super::cholesky::SymmetricOrdering`] on the unsymmetric $LU$
+/// path: `Colamd` is the default fill-reducing ordering, `Identity` disables
+/// reordering, and `Custom` lets the caller supply a precomputed elimination
+/// order (e.g. a nested-dissection ordering from an external library).
+///
+/// unlike [`super::cholesky::SymmetricOrdering::Custom`], which takes a full
+/// [`PermRef`] (both directions), `Custom` here takes the elimination order as
+/// a single slice with one fixed orientation. this is deliberate: the
+/// permutation orientation is load-bearing for fill (the wrong direction is
+/// still *correct* but produces pathological fill, since separators get
+/// eliminated first), and a single-slice input makes that mistake
+/// unrepresentable — there is no second array to accidentally flip.
+#[derive(Copy, Clone, Debug, Default)]
+pub enum LuColOrdering<'a, I: Index> {
+	/// fill-reducing COLAMD ordering (default); tuned via
+	/// [`LuSymbolicParams::colamd_params`]
+	#[default]
+	Colamd,
+	/// no reordering (identity column permutation)
+	Identity,
+	/// caller-supplied elimination order, given as a slice of length `n` in
+	/// **new → old** orientation: `order[k]` is the original column index
+	/// eliminated at step `k`. equivalently, this is the *forward* column
+	/// permutation; the inverse is built internally, so the caller never
+	/// handles (and cannot flip) the two directions.
+	Custom(&'a [I]),
+}
 /// the inner factorization used for the symbolic $LU$, either simplicial or
 /// symbolic
 #[derive(Debug, Clone)]
@@ -2186,9 +2216,17 @@ impl<I: Index> SymbolicLu<I> {
 }
 /// computes the symbolic $LU$ factorization of the matrix $A$, or returns an
 /// error if the operation could not be completed
+///
+/// `ord` selects the fill-reducing column ordering (see [`LuColOrdering`]).
+///
+/// # panics
+/// panics if `A` is not square, or if `ord` is [`LuColOrdering::Custom`] and
+/// its order is not a permutation of `0..A.ncols()` (wrong length,
+/// out-of-range entry or duplicate entry)
 #[track_caller]
 pub fn factorize_symbolic_lu<I: Index>(
 	A: SymbolicSparseColMatRef<'_, I>,
+	ord: LuColOrdering<'_, I>,
 	params: LuSymbolicParams<'_>,
 ) -> Result<SymbolicLu<I>, FaerError> {
 	assert!(A.nrows() == A.ncols());
@@ -2232,13 +2270,58 @@ pub fn factorize_symbolic_lu<I: Index>(
 	let mut col_perm_fwd = try_zeroed::<I>(n)?;
 	let mut col_perm_inv = try_zeroed::<I>(n)?;
 	let mut min_row = try_zeroed::<I>(m)?;
-	linalg_sp::colamd::order(
-		&mut col_perm_fwd,
-		&mut col_perm_inv,
-		A.as_dyn(),
-		params.colamd_params,
-		stack,
-	)?;
+	match ord {
+		LuColOrdering::Colamd => {
+			linalg_sp::colamd::order(
+				&mut col_perm_fwd,
+				&mut col_perm_inv,
+				A.as_dyn(),
+				params.colamd_params,
+				stack,
+			)?;
+		},
+		LuColOrdering::Identity => {
+			for i in 0..n {
+				col_perm_fwd[i] = I::truncate(i);
+				col_perm_inv[i] = I::truncate(i);
+			}
+		},
+		LuColOrdering::Custom(new_to_old) => {
+			// `new_to_old[k]` is the original column eliminated at step `k`
+			// (new -> old), i.e. the *forward* column permutation. we build the
+			// inverse (old -> new) ourselves so the caller cannot supply the
+			// flipped orientation, which stays correct but maximizes fill. the
+			// `PermRef::new_checked` below re-validates that this is a genuine
+			// permutation (bounds + fwd/inv consistency); the explicit checks
+			// here give an LU caller a clear panic message instead.
+			assert!(
+				new_to_old.len() == n,
+				"LuColOrdering::Custom: order has length {}, expected {n}",
+				new_to_old.len(),
+			);
+			// `n` is used as the "not yet seen" sentinel for duplicate
+			// detection; it never collides with a valid entry `< n`.
+			let unseen = I::truncate(n);
+			col_perm_inv.fill(unseen);
+			for (new, &old) in new_to_old.iter().enumerate() {
+				let old = old.zx();
+				assert!(
+					old < n,
+					"LuColOrdering::Custom: order[{new}] = {old} is out of \
+					 range for {n} columns",
+				);
+				assert!(
+					col_perm_inv[old] == unseen,
+					"LuColOrdering::Custom: column {old} appears more than \
+					 once (at order[{}] and order[{new}]); the order must be \
+					 a permutation of 0..{n}",
+					col_perm_inv[old].zx(),
+				);
+				col_perm_fwd[new] = I::truncate(old);
+				col_perm_inv[old] = I::truncate(new);
+			}
+		},
+	}
 	let col_perm =
 		PermRef::new_checked(&col_perm_fwd, &col_perm_inv, n).as_shape(N);
 	let (new_col_ptr, stack) = unsafe { stack.make_raw::<I>(m + 1) };
@@ -2411,7 +2494,10 @@ mod tests {
 			linalg_sp::qr::column_counts_ata(
 				&mut col_counts,
 				&mut min_col,
-				AT.symbolic(),
+				// `column_counts_ata` now takes `A` row-major; `AT` is `A`
+				// transposed in column-major, so transpose it back to a
+				// row-major view of `A`.
+				AT.symbolic().transpose(),
 				Some(col_perm),
 				etree,
 				&post,
@@ -2682,6 +2768,7 @@ mod tests {
 		] {
 			let symbolic = factorize_symbolic_lu(
 				A.symbolic(),
+				LuColOrdering::Colamd,
 				LuSymbolicParams {
 					supernodal_flop_ratio_threshold,
 					..Default::default()
@@ -2763,6 +2850,97 @@ mod tests {
 				let linsolve_diff = A.adjoint() * &x - &rhs;
 				assert!(linsolve_diff.norm_max() <= 1e-10);
 			}
+		}
+	}
+
+	#[test]
+	fn test_solver_lu_custom_col_ordering() {
+		type T = c64;
+		let (m, n, col_ptr, row_idx, val) = load_mtx::<usize>(
+			MtxData::from_file(
+				PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+					.join("test_data/sparse_lu/YAO.mtx"),
+			)
+			.unwrap(),
+		);
+		let mut rng = StdRng::seed_from_u64(0);
+		let mut gen = || T::new(rng.random::<f64>(), rng.random::<f64>());
+		let val = val.iter().map(|_| gen()).collect::<alloc::vec::Vec<_>>();
+		let A = SparseColMatRef::<'_, usize, T>::new(
+			SymbolicSparseColMatRef::new_checked(
+				m, n, &col_ptr, None, &row_idx,
+			),
+			&val,
+		);
+		let rhs = Mat::<T>::from_fn(m, 6, |_, _| gen());
+
+		// a non-trivial elimination order (new -> old): a cyclic shift by one.
+		// deliberately *not* an involution, so an orientation bug (building the
+		// permutation from the inverse) would produce a different forward
+		// permutation and be caught by the retrieval check below.
+		let new_to_old = (0..n)
+			.map(|k| (k + 1) % n)
+			.collect::<alloc::vec::Vec<usize>>();
+		// inverse of the cyclic shift (old -> new): shift by minus one.
+		let expected_inv = (0..n)
+			.map(|k| (k + n - 1) % n)
+			.collect::<alloc::vec::Vec<usize>>();
+
+		for ord in [
+			LuColOrdering::Colamd,
+			LuColOrdering::Identity,
+			LuColOrdering::Custom(&new_to_old),
+		] {
+			let is_custom = matches!(ord, LuColOrdering::Custom(_));
+			let symbolic =
+				factorize_symbolic_lu(A.symbolic(), ord, Default::default())
+					.unwrap();
+
+			// the supplied elimination order must be exactly the forward column
+			// permutation symbolic analysis used, with the inverse built from
+			// it in the correct orientation.
+			if is_custom {
+				let (f, i) = symbolic.col_perm().arrays();
+				assert!(
+					f.iter()
+						.map(|x| x.unbound())
+						.eq(new_to_old.iter().copied())
+				);
+				assert!(
+					i.iter()
+						.map(|x| x.unbound())
+						.eq(expected_inv.iter().copied())
+				);
+			}
+
+			let mut numeric = NumericLu::<usize, T>::new();
+			let lu = symbolic
+				.factorize_numeric_lu(
+					&mut numeric,
+					A,
+					Par::Seq,
+					MemStack::new(&mut MemBuffer::new(
+						symbolic.factorize_numeric_lu_scratch::<T>(
+							Par::Seq,
+							Default::default(),
+						),
+					)),
+					Default::default(),
+				)
+				.unwrap();
+
+			// every ordering must still yield a correct solve of `A x = rhs`
+			let mut x = rhs.clone();
+			lu.solve_in_place_with_conj(
+				crate::Conj::No,
+				x.as_mut(),
+				Par::Seq,
+				MemStack::new(&mut MemBuffer::new(
+					symbolic.solve_in_place_scratch::<T>(rhs.ncols(), Par::Seq),
+				)),
+			);
+			let linsolve_diff = A * &x - &rhs;
+			assert!(linsolve_diff.norm_max() <= 1e-10);
 		}
 	}
 }

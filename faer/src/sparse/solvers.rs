@@ -80,6 +80,7 @@ impl<I: Index> SymbolicLu<I> {
 		Ok(Self {
 			inner: alloc::sync::Arc::new(linalg_sp::lu::factorize_symbolic_lu(
 				mat,
+				linalg_sp::lu::LuColOrdering::default(),
 				Default::default(),
 			)?),
 		})
