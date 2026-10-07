@@ -1,5 +1,5 @@
 use super::GeneralizedSchurParams;
-use super::gen_hessenberg::{make_givens, rot};
+use super::gen_hessenberg::{active_block_is_finite, make_givens, rot};
 use crate::internal_prelude::*;
 use equator::assert;
 use linalg::matmul::matmul;
@@ -540,6 +540,17 @@ fn hessenberg_to_qz_unblocked<T: RealField>(
 		let bscale = safmin.fmax(&bnorm).recip();
 		'main_loop: for iter in 0..maxit {
 			_ = iter;
+			if !(H[(ilast, ilast)].is_finite() && T[(ilast, ilast)].is_finite())
+			{
+				// a non-finite iterate never deflates: report NaN eigenvalues
+				// for the unconverged block instead of running out `maxit`
+				for j in ilo..ilast + 1 {
+					alphar[j] = nan();
+					alphai[j] = nan();
+					beta[j] = nan();
+				}
+				break 'main_loop;
+			}
 			'goto110: {
 				'goto80: {
 					'goto70: {
@@ -1111,6 +1122,22 @@ fn hessenberg_to_qz_unblocked<T: RealField>(
 		alphai[j] = zero();
 		beta[j] = T[(j, j)].copy();
 	}
+
+	// fix up eigenvalue pairs
+	let mut j = ilo;
+	while j <= ihi {
+		// the non-finite fail-fast fills `alphai` with NaN, which is not a
+		// pair start; a pair can also never begin at the last slot
+		if alphai[j] == zero() || !alphai[j].is_finite() || j == ihi {
+			j += 1;
+		} else {
+			alphar[j + 1] = alphar[j].copy();
+			alphai[j + 1] = -&alphai[j];
+			beta[j + 1] = beta[j].copy();
+
+			j += 2;
+		}
+	}
 }
 fn double_shift_sweep<T: RealField>(
 	ascale: T,
@@ -1425,18 +1452,22 @@ pub fn hessenberg_to_qz_scratch<T: RealField>(
 	par: Par,
 	params: GeneralizedSchurParams,
 ) -> StackReq {
-	hessenberg_to_qz_blocked_scratch::<T>(n, par, params)
+	hessenberg_to_qz_blocked_scratch::<T>(n, 0, par, params)
 }
+/// recursion depth at which the deflation window qz switches to the unblocked
+/// algorithm (lapack `xlaqz0`'s `rec >= 2`)
+const MAX_AED_RECURSION: usize = 2;
 fn hessenberg_to_qz_blocked_scratch<T: RealField>(
 	n: usize,
+	rec: usize,
 	par: Par,
 	params: GeneralizedSchurParams,
 ) -> StackReq {
 	let nmin = Ord::max(15, params.blocking_threshold);
-	if n < nmin {
+	if n < nmin || rec >= MAX_AED_RECURSION {
 		return StackReq::empty();
 	}
-	let nw = (n - 3) / 3;
+	let nw = aed_window_bound(n, nmin);
 	let nsr = (params.recommended_shift_count)(n, n);
 	let rcost = (params.relative_cost_estimate_of_shift_chase_to_matmul)(n, n);
 	let itemp1 = (nsr as f64
@@ -1450,7 +1481,7 @@ fn hessenberg_to_qz_blocked_scratch<T: RealField>(
 		StackReq::all_of(&[
 			qc_aed,
 			qc_aed,
-			aed_scratch::<T>(n, nw, par, params),
+			aed_scratch::<T>(n, nw, rec, par, params),
 		]),
 		StackReq::all_of(&[
 			qc_sweep,
@@ -1465,11 +1496,12 @@ fn multishift_sweep_scratch<T: RealField>(n: usize, ns: usize) -> StackReq {
 fn aed_scratch<T: RealField>(
 	n: usize,
 	nw: usize,
+	rec: usize,
 	par: Par,
 	params: GeneralizedSchurParams,
 ) -> StackReq {
 	StackReq::any_of(&[
-		hessenberg_to_qz_blocked_scratch::<T>(nw, par, params),
+		hessenberg_to_qz_blocked_scratch::<T>(nw, rec + 1, par, params),
 		StackReq::all_of(&[
 			linalg::temp_mat_scratch::<T>(4, 4),
 			linalg::temp_mat_scratch::<T>(4, 4),
@@ -1552,10 +1584,20 @@ pub fn hessenberg_to_qz<T: RealField>(
 		alphai,
 		beta,
 		eigvals_only,
+		0,
 		par,
 		params,
 		stack,
 	)
+}
+/// largest deflation window the blocked qz may request for a pencil of
+/// dimension `n`: the recommended window is capped at `(n - 3) / 3` (rounded up
+/// to even), but an active block smaller than `nmin` is deflated with a window
+/// covering the whole block, as in lapack `xlaqz0`
+fn aed_window_bound(n: usize, nmin: usize) -> usize {
+	let nw_max = (n - 3) / 3;
+	let nw_max = nw_max + nw_max % 2;
+	Ord::min(n, Ord::max(nw_max, nmin))
 }
 fn hessenberg_to_qz_blocked<T: RealField>(
 	ilo: usize,
@@ -1568,6 +1610,7 @@ fn hessenberg_to_qz_blocked<T: RealField>(
 	mut alphai: ColMut<'_, T>,
 	mut beta: ColMut<'_, T>,
 	eigvals_only: bool,
+	rec: usize,
 	par: Par,
 	params: GeneralizedSchurParams,
 	stack: &mut MemStack,
@@ -1596,7 +1639,7 @@ fn hessenberg_to_qz_blocked<T: RealField>(
 		as usize;
 	let itemp1 = (itemp1.saturating_sub(1) / 4) * 4 + 4;
 	let nbr = &nsr + &itemp1;
-	if n < nmin {
+	if n < nmin || rec >= MAX_AED_RECURSION {
 		hessenberg_to_qz_unblocked(
 			ilo,
 			ihi,
@@ -1613,10 +1656,24 @@ fn hessenberg_to_qz_blocked<T: RealField>(
 	}
 	let nw_max = (n - 3) / 3;
 	let nw_max = nw_max + nw_max % 2;
+	// the recommended window is capped up front; the whole-block window
+	// chosen below for small active blocks is not, otherwise the window can
+	// never cover the block, no sweep runs (the block is below `nmin`) and
+	// the loop spins on aed until it exhausts `maxit` (lapack `xlaqz0`)
+	let nwr = Ord::min(nwr, nw_max);
 	for iter in 0..maxit {
 		_ = iter;
 		if istop == usize::MAX || istart + 1 >= istop {
 			break;
+		}
+		if !active_block_is_finite(A.rb(), B.rb(), istart, istop) {
+			// a non-finite iterate never deflates: stop now instead of running
+			// out the remaining sweeps, and report the failure as NaN
+			// eigenvalues (`gevd_*` turns these into `GevdError::NoConvergence`)
+			alphar.fill(nan());
+			alphai.fill(nan());
+			beta.fill(nan());
+			return;
 		}
 		if A[(istop - 1, istop - 2)].abs()
 			<= smlnum.fmax(
@@ -1793,7 +1850,6 @@ fn hessenberg_to_qz_blocked<T: RealField>(
 				nw = istop + 1 - istart2;
 			}
 		}
-		nw = Ord::min(nw, nw_max);
 		let (n_undeflated, n_deflated);
 		{
 			let (mut QC, stack) =
@@ -1816,6 +1872,7 @@ fn hessenberg_to_qz_blocked<T: RealField>(
 				beta.rb_mut(),
 				QC.rb_mut(),
 				ZC.rb_mut(),
+				rec,
 				par,
 				params,
 				stack,
@@ -2060,7 +2117,7 @@ fn chase_bulge_2x2<T: RealField>(
 		let (c1, s1, temp) = make_givens(h[(0, 0)].copy(), h[(1, 0)].copy());
 		h[(0, 0)] = temp;
 		h[(1, 0)] = zero();
-		rot_rows(c1, s1, h.rb_mut(), 0, 1);
+		rot_rows(c1, s1, h.rb_mut().get_mut(.., 1..), 0, 1);
 		let (c1, s1, _) = make_givens(h[(1, 2)].copy(), h[(1, 1)].copy());
 		rot_cols(c1.copy(), s1.copy(), h.rb_mut().get_mut(..1, ..), 2, 1);
 		let (c2, s2, _) = make_givens(h[(0, 1)].copy(), h[(0, 0)].copy());
@@ -2166,6 +2223,7 @@ fn aggressive_early_deflation<T: RealField>(
 	mut beta: ColMut<'_, T>,
 	mut QC: MatMut<'_, T>,
 	mut ZC: MatMut<'_, T>,
+	rec: usize,
 	par: Par,
 	params: GeneralizedSchurParams,
 	stack: &mut MemStack,
@@ -2213,6 +2271,7 @@ fn aggressive_early_deflation<T: RealField>(
 		alphai.rb_mut(),
 		beta.rb_mut(),
 		false,
+		rec + 1,
 		par,
 		params,
 		stack,
@@ -2284,7 +2343,7 @@ fn aggressive_early_deflation<T: RealField>(
 			}
 		}
 	}
-	let nd = &ihi - &kwbot;
+	let nd = ihi.wrapping_sub(kwbot);
 	let ns = &jw - &nd;
 	let mut k = kwtop;
 	while k <= ihi {
@@ -3718,6 +3777,7 @@ mod tests {
 					alphai.as_mut(),
 					beta.as_mut(),
 					false,
+					0,
 					Par::Seq,
 					auto!(f64),
 					MemStack::new(&mut MemBuffer::new(

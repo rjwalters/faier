@@ -1,5 +1,5 @@
 use super::GeneralizedSchurParams;
-use super::gen_hessenberg::{make_givens, rot, trot};
+use super::gen_hessenberg::{active_block_is_finite, make_givens, rot, trot};
 use crate::internal_prelude::*;
 use equator::assert;
 use linalg::matmul::matmul;
@@ -67,6 +67,16 @@ fn hessenberg_to_qz_unblocked<T: ComplexField>(
 	let bscale = safmin.fmax(&bnorm).recip();
 	if ihi >= ilo {
 		'main_loop: for _ in 0..maxit {
+			if !(H[(ilast, ilast)].is_finite() && T[(ilast, ilast)].is_finite())
+			{
+				// a non-finite iterate never deflates: report NaN eigenvalues
+				// for the unconverged block instead of running out `maxit`
+				for j in ilo..ilast + 1 {
+					alpha[j] = nan();
+					beta[j] = nan();
+				}
+				break 'main_loop;
+			}
 			'goto70: {
 				'goto60: {
 					'goto50: {
@@ -882,6 +892,7 @@ fn aggressive_early_deflation<T: ComplexField>(
 	mut beta: ColMut<'_, T>,
 	mut QC: MatMut<'_, T>,
 	mut ZC: MatMut<'_, T>,
+	rec: usize,
 	par: Par,
 	params: GeneralizedSchurParams,
 	stack: &mut MemStack,
@@ -925,6 +936,7 @@ fn aggressive_early_deflation<T: ComplexField>(
 		alpha.rb_mut(),
 		beta.rb_mut(),
 		false,
+		rec + 1,
 		par,
 		params,
 		stack,
@@ -1081,11 +1093,37 @@ pub fn hessenberg_to_qz_scratch<T: ComplexField>(
 	par: Par,
 	params: GeneralizedSchurParams,
 ) -> StackReq {
+	hessenberg_to_qz_blocked_scratch::<T>(n, 0, par, params)
+}
+/// recursion depth at which the deflation window qz switches to the unblocked
+/// algorithm (lapack `xlaqz0`'s `rec >= 2`)
+const MAX_AED_RECURSION: usize = 2;
+#[cfg(all(test, feature = "std"))]
+std::thread_local! {
+	/// iterations run by the blocked qz main loop on this thread, summed over
+	/// all deflation-window recursion levels (test instrumentation for the
+	/// deflation-window spin, geode-fem #908)
+	static BLOCKED_QZ_ITERATIONS: core::cell::Cell<usize> =
+		const { core::cell::Cell::new(0) };
+}
+/// largest deflation window the blocked qz may request for a pencil of
+/// dimension `n`: the recommended window is capped at `(n - 3) / 3`, but an
+/// active block smaller than `nmin` is deflated with a window covering the
+/// whole block, as in lapack `xlaqz0`
+fn aed_window_bound(n: usize, nmin: usize) -> usize {
+	Ord::min(n, Ord::max((n - 3) / 3, nmin))
+}
+fn hessenberg_to_qz_blocked_scratch<T: ComplexField>(
+	n: usize,
+	rec: usize,
+	par: Par,
+	params: GeneralizedSchurParams,
+) -> StackReq {
 	let nmin = Ord::max(15, params.blocking_threshold);
-	if n < nmin {
+	if n < nmin || rec >= MAX_AED_RECURSION {
 		return StackReq::EMPTY;
 	}
-	let nw = (n - 3) / 3;
+	let nw = aed_window_bound(n, nmin);
 	let nsr = (params.recommended_shift_count)(n, n);
 	let rcost = (params.relative_cost_estimate_of_shift_chase_to_matmul)(n, n);
 	let itemp1 = (nsr as f64
@@ -1099,7 +1137,7 @@ pub fn hessenberg_to_qz_scratch<T: ComplexField>(
 		StackReq::all_of(&[
 			qc_aed,
 			qc_aed,
-			aed_scratch::<T>(n, nw, par, params),
+			aed_scratch::<T>(n, nw, rec, par, params),
 		]),
 		StackReq::all_of(&[
 			qc_sweep,
@@ -1114,11 +1152,12 @@ fn multishift_sweep_scratch<T: ComplexField>(n: usize, ns: usize) -> StackReq {
 fn aed_scratch<T: ComplexField>(
 	n: usize,
 	nw: usize,
+	rec: usize,
 	par: Par,
 	params: GeneralizedSchurParams,
 ) -> StackReq {
 	StackReq::any_of(&[
-		hessenberg_to_qz_scratch::<T>(nw, par, params),
+		hessenberg_to_qz_blocked_scratch::<T>(nw, rec + 1, par, params),
 		linalg::temp_mat_scratch::<T>(nw, n),
 		linalg::temp_mat_scratch::<T>(n, nw),
 	])
@@ -1178,6 +1217,7 @@ pub fn hessenberg_to_qz<T: ComplexField>(
 		alpha,
 		beta,
 		eigvals_only,
+		0,
 		par,
 		params,
 		stack,
@@ -1193,6 +1233,7 @@ fn hessenberg_to_qz_blocked<T: ComplexField>(
 	alpha: ColMut<'_, T>,
 	beta: ColMut<'_, T>,
 	eigvals_only: bool,
+	rec: usize,
 	par: Par,
 	params: GeneralizedSchurParams,
 	stack: &mut MemStack,
@@ -1225,7 +1266,7 @@ fn hessenberg_to_qz_blocked<T: ComplexField>(
 			.sqrt()) as usize;
 	let itemp1 = (itemp1.saturating_sub(1) / 4) * 4 + 4;
 	let nbr = &nsr + &itemp1;
-	if n < nmin {
+	if n < nmin || rec >= MAX_AED_RECURSION {
 		hessenberg_to_qz_unblocked(
 			ilo,
 			ihi,
@@ -1240,10 +1281,25 @@ fn hessenberg_to_qz_blocked<T: ComplexField>(
 		return;
 	}
 	let nw_max = (n - 3) / 3;
+	// the recommended window is capped up front; the whole-block window
+	// chosen below for small active blocks is not, otherwise the window can
+	// never cover the block, no sweep runs (the block is below `nmin`) and
+	// the loop spins on aed until it exhausts `maxit` (lapack `xlaqz0`)
+	let nwr = Ord::min(nwr, nw_max);
 	for iter in 0..maxit {
 		_ = iter;
+		#[cfg(all(test, feature = "std"))]
+		BLOCKED_QZ_ITERATIONS.with(|count| count.set(count.get() + 1));
 		if istop == usize::MAX || istart + 1 >= istop {
 			break;
+		}
+		if !active_block_is_finite(A.rb(), B.rb(), istart, istop) {
+			// a non-finite iterate never deflates: stop now instead of running
+			// out the remaining sweeps, and report the failure as NaN
+			// eigenvalues (`gevd_*` turns these into `GevdError::NoConvergence`)
+			alpha.fill(nan());
+			beta.fill(nan());
+			return;
 		}
 		if A[(istop, istop - 1)].abs()
 			<= smlnum.fmax(
@@ -1402,7 +1458,6 @@ fn hessenberg_to_qz_blocked<T: ComplexField>(
 				nw = istop + 1 - istart2;
 			}
 		}
-		nw = Ord::min(nw, nw_max);
 		let (n_undeflated, n_deflated);
 		{
 			let (mut QC, stack) =
@@ -1424,6 +1479,7 @@ fn hessenberg_to_qz_blocked<T: ComplexField>(
 				beta.rb_mut(),
 				QC.rb_mut(),
 				ZC.rb_mut(),
+				rec,
 				par,
 				params,
 				stack,
@@ -1633,6 +1689,7 @@ mod tests {
 					alpha.as_mut(),
 					beta.as_mut(),
 					false,
+					0,
 					Par::Seq,
 					auto!(c64),
 					MemStack::new(&mut MemBuffer::new(
@@ -1655,5 +1712,104 @@ mod tests {
 				}
 			}
 		}
+	}
+}
+#[cfg(all(test, feature = "std"))]
+mod aed_window_spin_tests {
+	use super::BLOCKED_QZ_ITERATIONS;
+	use crate::linalg::gevd::{
+		ComputeEigenvectors, GevdParams, gevd_cplx, gevd_scratch,
+	};
+	use crate::{Mat, Par, c64};
+	use dyn_stack::{MemBuffer, MemStack};
+
+	struct Lcg(u64);
+	impl Lcg {
+		fn next(&mut self) -> f64 {
+			self.0 = self
+				.0
+				.wrapping_mul(6364136223846793005)
+				.wrapping_add(1442695040888963407);
+			((self.0 >> 11) as f64) / ((1u64 << 53) as f64) - 0.5
+		}
+	}
+
+	/// the 600-row complex-symmetric pencil of
+	/// `tests/fork_qz_aed_window_spin.rs`: `(S^T D_K S, S^T D_M S)` with an
+	/// exact null cluster of `n / 9` eigenvalues, as produced by a Nedelec
+	/// discretization with absorbing layers. 600 rows is above the ~590 where
+	/// the default shift count doubles, which is where the spin started
+	fn null_cluster_pencil(n: usize) -> (Mat<c64>, Mat<c64>) {
+		let n_null = n / 9;
+		let mut rng = Lcg(0x796);
+		let s = Mat::<f64>::from_fn(n, n, |i, j| {
+			(if i == j { 1.0 } else { 0.0 })
+				+ 0.5 * rng.next() / (n as f64).sqrt()
+		});
+		let dk: Vec<c64> = (0..n)
+			.map(|i| {
+				let re = if i < n_null {
+					0.0
+				} else {
+					1.0 + 50.0 * (rng.next() + 0.5)
+				};
+				c64::new(re, 0.0)
+			})
+			.collect();
+		let dm: Vec<c64> = (0..n)
+			.map(|_| c64::new(1.0 + rng.next(), 0.3 * (rng.next() + 0.5)))
+			.collect();
+		let congruence = |d: &[c64]| {
+			let ds = Mat::<c64>::from_fn(n, n, |i, j| d[i] * s[(i, j)]);
+			let st = Mat::<c64>::from_fn(n, n, |i, j| c64::new(s[(j, i)], 0.0));
+			&st * &ds
+		};
+		(congruence(&dk), congruence(&dm))
+	}
+
+	/// geode-fem #908 / #867: the blocked qz capped the whole-block deflation
+	/// window of a small active block at `(n - 3) / 3`, so the window never
+	/// reached the top of the block, no sweep ran and the loop spun on
+	/// deflation windows until it ran out its `30 n` iterations, recursively
+	/// inside every deflation window (which also had no recursion limit). the
+	/// final unblocked qz still produced the right eigenvalues, only several
+	/// times slower, so this counts the blocked-loop iterations instead of
+	/// timing the solve: the count is deterministic (sequential, fixed input)
+	/// and independent of host load
+	#[test]
+	fn blocked_complex_qz_does_not_spin_on_deflation_windows() {
+		let n = 600;
+		let (mut a, mut b) = null_cluster_pencil(n);
+		let params: GevdParams = <GevdParams as crate::Auto<c64>>::auto();
+		let mut buf = MemBuffer::new(gevd_scratch::<c64>(
+			n,
+			ComputeEigenvectors::No,
+			ComputeEigenvectors::No,
+			Par::Seq,
+			params.into(),
+		));
+		let mut alpha = crate::diag::Diag::<c64>::zeros(n);
+		let mut beta = crate::diag::Diag::<c64>::zeros(n);
+		BLOCKED_QZ_ITERATIONS.with(|count| count.set(0));
+		gevd_cplx(
+			a.as_mut(),
+			b.as_mut(),
+			alpha.as_mut(),
+			beta.as_mut(),
+			None,
+			None,
+			Par::Seq,
+			MemStack::new(&mut buf),
+			params.into(),
+		)
+		.unwrap();
+		let iterations = BLOCKED_QZ_ITERATIONS.with(|count| count.get());
+		assert!((0..n).all(|i| (alpha[i] / beta[i]).is_finite()));
+		// 155 iterations with the fix, 20259 without (the top-level loop
+		// alone runs out `30 n = 18000`)
+		assert!(
+			iterations <= 1000,
+			"{iterations} blocked qz iterations: the deflation-window spin is back"
+		);
 	}
 }
