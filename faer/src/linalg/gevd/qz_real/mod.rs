@@ -1,5 +1,5 @@
 use super::GeneralizedSchurParams;
-use super::gen_hessenberg::{make_givens, rot};
+use super::gen_hessenberg::{active_block_is_finite, make_givens, rot};
 use crate::internal_prelude::*;
 use equator::assert;
 use linalg::matmul::matmul;
@@ -540,6 +540,17 @@ fn hessenberg_to_qz_unblocked<T: RealField>(
 		let bscale = safmin.fmax(&bnorm).recip();
 		'main_loop: for iter in 0..maxit {
 			_ = iter;
+			if !(H[(ilast, ilast)].is_finite() && T[(ilast, ilast)].is_finite())
+			{
+				// a non-finite iterate never deflates: report NaN eigenvalues
+				// for the unconverged block instead of running out `maxit`
+				for j in ilo..ilast + 1 {
+					alphar[j] = nan();
+					alphai[j] = nan();
+					beta[j] = nan();
+				}
+				break 'main_loop;
+			}
 			'goto110: {
 				'goto80: {
 					'goto70: {
@@ -1617,6 +1628,15 @@ fn hessenberg_to_qz_blocked<T: RealField>(
 		_ = iter;
 		if istop == usize::MAX || istart + 1 >= istop {
 			break;
+		}
+		if !active_block_is_finite(A.rb(), B.rb(), istart, istop) {
+			// a non-finite iterate never deflates: stop now instead of running
+			// out the remaining sweeps, and report the failure as NaN
+			// eigenvalues (`gevd_*` turns these into `GevdError::NoConvergence`)
+			alphar.fill(nan());
+			alphai.fill(nan());
+			beta.fill(nan());
+			return;
 		}
 		if A[(istop - 1, istop - 2)].abs()
 			<= smlnum.fmax(

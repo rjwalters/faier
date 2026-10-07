@@ -94,6 +94,22 @@ pub(crate) fn make_givens<T: ComplexField>(f: T, g: T) -> (T::Real, T, T) {
 		(c, s, r)
 	}
 }
+/// returns `true` if the diagonal and subdiagonal of `A` and the diagonal of
+/// `B` are finite over the active block `istart..=istop`. a non-finite iterate
+/// never satisfies a deflation test, so the qz loops use this to stop early
+/// instead of running out their `30 n` iteration cap
+pub(crate) fn active_block_is_finite<T: ComplexField>(
+	A: MatRef<'_, T>,
+	B: MatRef<'_, T>,
+	istart: usize,
+	istop: usize,
+) -> bool {
+	(istart..istop + 1).all(|k| {
+		A[(k, k)].is_finite()
+			&& B[(k, k)].is_finite()
+			&& (k == istart || A[(k, k - 1)].is_finite())
+	})
+}
 pub(crate) fn rot<T: ComplexField>(
 	c: T::Real,
 	s: T,

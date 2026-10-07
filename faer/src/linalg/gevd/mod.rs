@@ -308,6 +308,23 @@ fn compute_gevd_generic<T: ComplexField>(
 		params.schur,
 		stack,
 	);
+	// the qz iteration reports a breakdown (a non-finite iterate) through
+	// non-finite eigenvalues. a genuine infinite eigenvalue has `beta = 0` with
+	// finite `alpha`, so it is not mistaken for one
+	if !(alpha_re.is_all_finite()
+		&& alpha_im.is_all_finite()
+		&& beta.is_all_finite())
+	{
+		{ alpha_re }.fill(nan());
+		{ alpha_im }.fill(nan());
+		{ beta }.fill(nan());
+		for u in [u_left, u_right] {
+			if let Some(mut u) = u {
+				u.fill(nan());
+			}
+		}
+		return Err(GevdError::NoConvergence);
+	}
 	qz_to_gevd(
 		A.rb(),
 		B.rb(),
