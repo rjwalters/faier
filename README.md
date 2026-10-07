@@ -1,5 +1,8 @@
 # faier — faer, with AI-assisted fixes
 
+[![faier on crates.io](https://img.shields.io/crates/v/faier.svg)](https://crates.io/crates/faier)
+[![faier documentation](https://docs.rs/faier/badge.svg)](https://docs.rs/faier)
+
 **About this fork.** `faier` is a maintained fork of [faer](https://github.com/sarah-quinones/faer-rs) by Sarah Quiñones, used by [geode-fem](https://github.com/rjwalters/geode-fem) and related projects. Upstream does not accept contributions written with AI assistance. Our development uses AI tools, so fixes we need cannot go upstream, and we carry them here instead.
 
 - **Same API, with two sparse-factorization exceptions.** The package is named `faier`, but the library name is still `faer`, so existing code keeps `use faer::...`. `faier` 0.25 is based on faer 0.24.4 and differs from its API in two places: sparse LU's `factorize_symbolic_lu` takes a column-ordering argument (pass `LuColOrdering::Colamd` for faer's behaviour), and sparse QR's `column_counts_ata` takes the matrix `A` instead of its transpose. See [Using faier](#using-faier) below.
@@ -20,7 +23,7 @@ faer = { package = "faier", version = "0.25" }
 use faer::Mat;
 ```
 
-> **Not yet on crates.io.** The crates.io form above works only once `faier` has been published (tracked in [#3](https://github.com/rjwalters/faier/issues/3)). Until then, and for fixes that are on `main` but not yet released, use the git form:
+For fixes that are on `main` but not yet released, use the git form:
 
 ```toml
 [dependencies]
@@ -32,6 +35,9 @@ If you depend on `faer-traits` directly, rename that too; its library name is st
 
 ```toml
 faer-traits = { package = "faier-traits", version = "0.24" }
+# with the git form of faier, take faier-traits from git as well, or cargo
+# builds two copies of the traits crate:
+# faer-traits = { package = "faier-traits", git = "https://github.com/rjwalters/faier" }
 ```
 
 The list of changes this fork carries on top of upstream, each with the issue it resolves, is in [`FORK.md`](FORK.md).
