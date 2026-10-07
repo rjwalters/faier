@@ -2284,7 +2284,7 @@ fn aggressive_early_deflation<T: RealField>(
 			}
 		}
 	}
-	let nd = &ihi - &kwbot;
+	let nd = ihi.wrapping_sub(kwbot);
 	let ns = &jw - &nd;
 	let mut k = kwtop;
 	while k <= ihi {
