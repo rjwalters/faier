@@ -5,9 +5,11 @@ edition = "2021"
 authors = ["sarah quiñones <sarah@veganb.tw>"]
 description = "linear algebra library — maintained fork of faer with AI-assisted fixes"
 readme = "../README.md"
+documentation = "https://docs.rs/faier-traits"
 repository = "https://github.com/rjwalters/faier"
 license = "MIT"
 keywords = ["math", "linear-algebra"]
+categories = ["mathematics", "science"]
 
 [lib]
 name = "faer_traits"

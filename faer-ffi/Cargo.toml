@@ -2,12 +2,13 @@
 name = "faer-ffi"
 version = "0.1.0"
 edition = "2021"
+publish = false
 
 [lib]
 crate-type = ["cdylib"]
 
 [dependencies]
-faer = { package = "faier", version = "0.24.4", path = "../faer" }
+faer = { package = "faier", version = "0.24.5", path = "../faer" }
 pastey = "0.2.1"
 
 [build-dependencies]

@@ -5,15 +5,15 @@
 | Version | Change | Resolves |
 |---|---|---|
 | 0.24.4 | Crate renamed `faer` → `faier` and `faer-traits` → `faier-traits`; library names unchanged (`faer`, `faer_traits`). No code changes. | — |
-| unreleased | `qz_real` aggressive early deflation: `ihi - kwbot` wrapped (`kwbot = kwtop - 1` at row 0) and panicked under overflow checks; now `wrapping_sub`. Test: `tests/fork_qz_real_aed_index_overflow.rs`. | geode-fem [#908](https://github.com/rjwalters/geode-fem/issues/908) / [#867](https://github.com/rjwalters/geode-fem/issues/867) (QZ overflow-panic suppression) |
-| unreleased | Blocked generalized Hessenberg without `Z` cleared the whole rectangle `[jcol+2.., jcol..n-jcol-2]` instead of the panel's lower trapezoid, wiping the reduced pair: eigenvalues-only `gevd_*` above 32 rows returned mostly `alpha = beta = 0`. Test: `tests/fork_gen_hessenberg_without_qz.rs`. | geode-fem #908 (found reproducing #867) |
-| unreleased | `make_givens` scaling guard: `1 / h` and `1 / c` overflowed for subnormal `h = hypot(\|f\|, \|g\|)` or `\|f\| << \|g\|`, turning complex QZ iterates into NaN on degenerate-cluster shifts (the complex QZ "hang"). Test: `make_givens_tests` (unit). | geode-fem #908 / #867 item 1 |
-| unreleased | `make_givens` falls back to LAPACK `zlartg`/`dlartg` (Anderson's safe scaling as in LAPACK 3.10+, which scales `f` on its own when `\|f\| / \|g\|` is below `sqrt(min_positive)`) wherever the upstream formula is unsafe. The first guard took `sgn(f)` from `f / max(\|f\|, \|g\|)`, which lost the complex phase below `\|f\| / \|g\|` ~ 2e-308 (unitarity error 1e-8 at `\|g\| = 1e15`) and gave NaN below ~5e-324. Its retry-by-recursion also overflowed the stack on NaN input. Upstream results are unchanged, bit for bit, wherever upstream is safe. Test: `make_givens_tests` (unit; sweeps subnormal to 8e307 magnitudes, zero inputs and complex phases). | geode-fem #908 / #867 item 1 (review of rjwalters/faier#1) |
-| unreleased | QZ (real and complex, blocked and unblocked) stops at the first non-finite iterate instead of running out `30 n` sweeps; `gevd_*` report it as `GevdError::NoConvergence`. Test: `tests/fork_qz_nonfinite_fails_fast.rs`. | geode-fem #908 / #867 item 1 |
-| unreleased | `qz_real::chase_bulge_2x2`: the 2x3 work-block row rotation hit all three columns, so each double-shift chase perturbed `B` by O(\|B\|): 1e-2 eigenvalue errors and spurious complex pairs on definite pencils from ~600 rows. Test: `tests/fork_qz_real_bulge_chase_accuracy.rs`. | geode-fem #908 / #867 item 2 |
-| unreleased | Blocked QZ (real and complex) deflation-window spin: small-block whole-block window no longer capped at `(n-3)/3`, and the window QZ drops to the unblocked algorithm at recursion depth 2 (LAPACK `xlaqz0`). Several times faster from ~590 rows. Tests: `qz_cplx::aed_window_spin_tests` (unit; counts blocked-loop iterations, 155 vs 20259 before, so it does not depend on host load) and `tests/fork_qz_aed_window_spin.rs` (accuracy). | geode-fem #908 / #867 items 1, 2 |
-| unreleased | Tridiagonal divide and conquer scales `T` by a power of two to unit norm first, so the `8 eps` deflation tolerance is relative (LAPACK `dstedc`); small-norm matrices no longer merge distinct eigenvalues. Test: `tests/fork_tridiag_dc_small_norm.rs`. | geode-fem #908 / #867 item 3 |
-| unreleased | Cherry-picked upstream's unreleased `fix.gevd-313` (`7628d92`, sarah quiñones): `gevd_scratch` under-allocated for `n = 2` with eigenvectors, and the eigenvalues-only real QZ now writes both slots of a conjugate pair. | upstream `fix.gevd-313` |
+| 0.24.5 | `qz_real` aggressive early deflation: `ihi - kwbot` wrapped (`kwbot = kwtop - 1` at row 0) and panicked under overflow checks; now `wrapping_sub`. Test: `tests/fork_qz_real_aed_index_overflow.rs`. | geode-fem [#908](https://github.com/rjwalters/geode-fem/issues/908) / [#867](https://github.com/rjwalters/geode-fem/issues/867) (QZ overflow-panic suppression) |
+| 0.24.5 | Blocked generalized Hessenberg without `Z` cleared the whole rectangle `[jcol+2.., jcol..n-jcol-2]` instead of the panel's lower trapezoid, wiping the reduced pair: eigenvalues-only `gevd_*` above 32 rows returned mostly `alpha = beta = 0`. Test: `tests/fork_gen_hessenberg_without_qz.rs`. | geode-fem #908 (found reproducing #867) |
+| 0.24.5 | `make_givens` scaling guard: `1 / h` and `1 / c` overflowed for subnormal `h = hypot(\|f\|, \|g\|)` or `\|f\| << \|g\|`, turning complex QZ iterates into NaN on degenerate-cluster shifts (the complex QZ "hang"). Test: `make_givens_tests` (unit). | geode-fem #908 / #867 item 1 |
+| 0.24.5 | `make_givens` falls back to LAPACK `zlartg`/`dlartg` (Anderson's safe scaling as in LAPACK 3.10+, which scales `f` on its own when `\|f\| / \|g\|` is below `sqrt(min_positive)`) wherever the upstream formula is unsafe. The first guard took `sgn(f)` from `f / max(\|f\|, \|g\|)`, which lost the complex phase below `\|f\| / \|g\|` ~ 2e-308 (unitarity error 1e-8 at `\|g\| = 1e15`) and gave NaN below ~5e-324. Its retry-by-recursion also overflowed the stack on NaN input. Upstream results are unchanged, bit for bit, wherever upstream is safe. Test: `make_givens_tests` (unit; sweeps subnormal to 8e307 magnitudes, zero inputs and complex phases). | geode-fem #908 / #867 item 1 (review of rjwalters/faier#1) |
+| 0.24.5 | QZ (real and complex, blocked and unblocked) stops at the first non-finite iterate instead of running out `30 n` sweeps; `gevd_*` report it as `GevdError::NoConvergence`. Test: `tests/fork_qz_nonfinite_fails_fast.rs`. | geode-fem #908 / #867 item 1 |
+| 0.24.5 | `qz_real::chase_bulge_2x2`: the 2x3 work-block row rotation hit all three columns, so each double-shift chase perturbed `B` by O(\|B\|): 1e-2 eigenvalue errors and spurious complex pairs on definite pencils from ~600 rows. Test: `tests/fork_qz_real_bulge_chase_accuracy.rs`. | geode-fem #908 / #867 item 2 |
+| 0.24.5 | Blocked QZ (real and complex) deflation-window spin: small-block whole-block window no longer capped at `(n-3)/3`, and the window QZ drops to the unblocked algorithm at recursion depth 2 (LAPACK `xlaqz0`). Several times faster from ~590 rows. Tests: `qz_cplx::aed_window_spin_tests` (unit; counts blocked-loop iterations, 155 vs 20259 before, so it does not depend on host load) and `tests/fork_qz_aed_window_spin.rs` (accuracy). | geode-fem #908 / #867 items 1, 2 |
+| 0.24.5 | Tridiagonal divide and conquer scales `T` by a power of two to unit norm first, so the `8 eps` deflation tolerance is relative (LAPACK `dstedc`); small-norm matrices no longer merge distinct eigenvalues. Test: `tests/fork_tridiag_dc_small_norm.rs`. | geode-fem #908 / #867 item 3 |
+| 0.24.5 | Cherry-picked upstream's unreleased `fix.gevd-313` (`7628d92`, sarah quiñones): `gevd_scratch` under-allocated for `n = 2` with eigenvectors, and the eigenvalues-only real QZ now writes both slots of a conjugate pair. | upstream `fix.gevd-313` |
 
 ## Upstream base
 
@@ -91,3 +91,70 @@ Every change carried on top of upstream needs both of these:
 ### Watching for new releases
 
 `.github/workflows/upstream-tag-watch.yml` runs weekly and on demand (`workflow_dispatch`). It compares the newest `faer-v*` tag on the GitHub mirror with the tag under **Upstream base**. If upstream is newer, it opens an issue in this repo, unless an open issue for that tag already exists. It only reads from upstream.
+
+## Releases
+
+`faier` and `faier-traits` are published to crates.io by [release-plz](https://release-plz.dev), using crates.io [Trusted Publishing](https://crates.io/docs/trusted-publishing) (GitHub OIDC) instead of a stored token. Nothing else in the workspace is published: `faer-macros`, `faer-ffi`, `faer-no-std-test` and `eigen-bench-setup` have `publish = false`, and `release-plz.toml` opts in only the two packages, by package name.
+
+### Versioning
+
+- **`faier` tracks upstream's minor and bumps the patch for fork releases.** The first release is `0.24.5` (upstream `faer-v0.24.4` plus the fixes in the table above). Further fork releases on the same base are `0.24.6`, `0.24.7`, and so on.
+- **A new upstream minor resets the patch.** When a sync brings in `faer-v0.25.0`, `faier` becomes `0.25.0` (the sync takes upstream's version, as in "Syncing upstream" step 4), and later fork releases are `0.25.1`, ….
+- **Upstream patch releases do not set `faier`'s patch.** After a sync of an upstream patch release (say `faer-v0.24.6` while `faier` is already at `0.24.7`), keep the higher of the two versions and let the next release bump it, because crates.io cannot reuse a published version.
+- **`faier-traits` versions independently** (`0.24.0` now) and is bumped only when its own files change. `faier`'s `faer-traits = { …, version = "…" }` requirement follows it; release-plz updates that line.
+- Semver build metadata (`+fork.1`) is not used: cargo ignores it when resolving versions.
+
+### Tags and changelogs
+
+| Package | Git tag / GitHub Release | Changelog |
+|---|---|---|
+| `faier` | `v{version}`, e.g. `v0.24.5` | `faer/CHANGELOG.md` |
+| `faier-traits` | `faier-traits-v{version}`, e.g. `faier-traits-v0.24.0` | `faer-traits/CHANGELOG.md` |
+
+The tags cannot collide with upstream's (`faer-v*`, `faer-traits-v*`, `faer-macros-v*`), which arrive with each sync. The changelogs are inside each package directory, so they ship in the crates, upstream has no file at those paths to conflict with, and upstream's hand-written root `CHANGELOG.md` is never rewritten. This table of fork changes stays the authoritative per-fix record; the package changelogs are the per-release summary.
+
+### How a release happens
+
+The workflow is `.github/workflows/release-plz.yml`. Both jobs are skipped unless the repository variable `RELEASE_PLZ_ENABLED` is `true` (see the checklist below).
+
+1. **Release PR.** On every push to `main`, the `release-plz-pr` job opens or updates a PR from a `release-plz-*` branch. The PR bumps the versions in `faer/Cargo.toml` / `faer-traits/Cargo.toml` (and `Cargo.lock`) and adds the new commits to the package changelogs. It only covers packages whose packaged files changed since the version on crates.io (`cargo package --list -p <name>` shows those files).
+2. **Review it like any PR.** Check the proposed version against the rule above and edit the changelog (it lists every commit that touched the package, including upstream's commits after a sync; trim it to what users need).
+3. **Merge it.** The push of the merged release PR runs the `release-plz-release` job, which publishes `faier-traits` (if bumped) and then `faier` to crates.io, pushes the tags and creates the GitHub Releases from the changelog entries. Ordinary pushes to `main` publish nothing (`release_always = false`): release-plz only releases when the pushed commit belongs to a merged PR from a `release-plz-*` branch.
+
+**Version bumps (release-plz 0.3.169, checked against its docs and source).** release-plz derives the bump from [conventional commits](https://www.conventionalcommits.org/) via the `next_version` crate. On `0.x`, `fix:` and `feat:` both propose a patch (`0.24.5` → `0.24.6`; `features_always_increment_minor = false` is set explicitly). A breaking change (`feat!:`, a `BREAKING CHANGE:` footer, or a cargo-semver-checks failure, which runs by default) proposes the next minor (`0.25.0`). That conflicts with the rule above, so when it happens either fix the API break or override the version before merging: `release-plz set-version faier@0.24.6` on the release PR branch, or edit `version` in `faer/Cargo.toml` (and the `faer-ffi` path dependency). If `Cargo.toml` already holds a version that is not on crates.io (for example `0.25.0` after an upstream-minor sync), release-plz keeps it and only updates the changelog.
+
+**CI on the release PR.** The release PR is opened with the workflow's `GITHUB_TOKEN`, and GitHub does not start workflows for events created by that token, so the test workflows do not run on it automatically. Before merging, close and reopen the PR (a `reopened` event from a person triggers `pull_request` workflows) and wait for green checks. No PAT or GitHub App is used, to keep publishing free of long-lived credentials.
+
+**Dry runs.** `cargo publish --dry-run -p faier -p faier-traits` (cargo 1.90 or newer) must pass before any release. `cargo publish --dry-run -p faier` on its own fails until `faier-traits` is on crates.io ("no matching package named `faier-traits` found"), because cargo resolves `faier`'s dependency from the registry; publishing both packages in one command resolves it locally.
+
+### Operator checklist
+
+The repository's automation never publishes, tags or changes settings; these steps are the operator's. crates.io publishes are permanent (a version can be yanked, never replaced or deleted).
+
+**(a) crates.io ownership.** Log in to crates.io with the GitHub account that will own the crates (`rjwalters`) and verify the email address (crates.io requires a verified email to publish). Check that `faier` and `faier-traits` are still unclaimed: `https://crates.io/api/v1/crates/faier` should return 404.
+
+**(b) First publish, with a short-lived token.** Trusted Publishing cannot create a crate: crates.io only lets you add a trusted publisher to a crate that already exists, and its docs state that the initial publish requires an API token (release-plz's docs say the same). So the first versions are published by hand, once:
+
+1. Create a token at <https://crates.io/settings/tokens/new> with the endpoint scope `publish-new` only, crate scopes `faier` and `faier-traits`, and the shortest expiry offered (or a custom date of tomorrow).
+2. On a clean checkout of `main` that contains this release setup (with `faer/Cargo.toml` at `0.24.5`), run the dry run above, then `cargo login` (paste the token at the prompt, not on the command line) and `cargo publish -p faier-traits -p faier`. Cargo publishes `faier-traits` first and waits for it to appear in the index before publishing `faier`. With cargo older than 1.90, run `cargo publish -p faier-traits`, then `cargo publish -p faier`.
+3. Run `cargo logout` and revoke the token on <https://crates.io/settings/tokens>.
+
+**(c) Add the trusted publishers.** For each crate: crates.io → the crate → Settings → Trusted Publishing → Add → GitHub, with repository owner `rjwalters`, repository name `faier`, workflow filename `release-plz.yml`, and no environment. If you add a GitHub environment as an extra gate, enter its name here and add `environment: <name>` to the `release-plz-release` job.
+
+**(d) Allow the release PR.** GitHub → Settings → Actions → General → Workflow permissions: tick "Allow GitHub Actions to create and approve pull requests" (off on this repository as of 2026-10-07). Without it the `release-plz-pr` job cannot open the release PR.
+
+**(e) Tag the hand-published versions and enable the workflow.**
+
+```sh
+SHA=<commit the crates were published from>
+git tag -a faier-traits-v0.24.0 "$SHA" -m "faier-traits 0.24.0"
+git tag -a v0.24.5 "$SHA" -m "faier 0.24.5"
+git push origin faier-traits-v0.24.0 v0.24.5
+gh release create v0.24.5 -R rjwalters/faier --verify-tag --title v0.24.5 --notes "See faer/CHANGELOG.md and FORK.md."
+gh release create faier-traits-v0.24.0 -R rjwalters/faier --verify-tag --title faier-traits-v0.24.0 --notes "See faer-traits/CHANGELOG.md."
+gh variable set RELEASE_PLZ_ENABLED -R rjwalters/faier --body true
+```
+
+The next push to `main` then opens the first release PR, if anything packaged has changed since `0.24.5`. `release-plz release` skips versions that are already on crates.io, so enabling the workflow after the manual publish does not publish them again.
+
+**(f) Badges.** After the first publish, add crates.io and docs.rs badges for `faier` to `README.md` (follow-up, not part of the release setup).

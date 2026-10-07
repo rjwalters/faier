@@ -1,0 +1,39 @@
+# release-plz configuration (https://release-plz.dev/docs/config), checked
+# against release-plz 0.3.169, the version pinned in
+# .github/workflows/release-plz.yml. FORK.md "Releases" explains the policy.
+#
+# Only `faier` and `faier-traits` are released. Packages are addressed by
+# package name, not by directory (`faer/`, `faer-traits/`) or library name
+# (`faer`, `faer_traits`). Every other workspace crate is also
+# `publish = false` in its own Cargo.toml.
+
+[workspace]
+# Ignore every package unless a [[package]] entry below opts it in.
+release = false
+# Publish only when a release PR (branch `release-plz-*`) is merged, never on
+# an ordinary push to main.
+release_always = false
+# 0.x: `feat:` commits bump the patch (0.24.5 -> 0.24.6). Kept explicit
+# because the fork's rule is "patch releases on top of upstream's minor".
+# Breaking changes (`feat!:`, `BREAKING CHANGE:`, or a cargo-semver-checks
+# failure) still propose the next minor; see FORK.md "Releases".
+features_always_increment_minor = false
+# Only bump workspace packages in Cargo.lock, not third-party dependencies.
+dependencies_update = false
+
+[[package]]
+name = "faier"
+release = true
+# Package-local changelog, shipped in the crate. Upstream has no
+# faer/CHANGELOG.md, so syncs never conflict with it, and upstream's
+# hand-written root CHANGELOG.md is never rewritten.
+changelog_path = "faer/CHANGELOG.md"
+git_tag_name = "v{{ version }}"
+git_release_name = "v{{ version }}"
+
+[[package]]
+name = "faier-traits"
+release = true
+changelog_path = "faer-traits/CHANGELOG.md"
+git_tag_name = "faier-traits-v{{ version }}"
+git_release_name = "faier-traits-v{{ version }}"

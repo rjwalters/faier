@@ -1,0 +1,89 @@
+# Release `faier` and `faier-traits` with release-plz (FORK.md "Releases").
+#
+# - release-plz-pr: on every push to main, opens or updates the release PR
+#   (version bump + package changelogs).
+# - release-plz-release: publishes to crates.io, tags and creates the GitHub
+#   Release, but only when the pushed commit is a merged release PR
+#   (`release_always = false` in release-plz.toml).
+#
+# Publishing uses crates.io Trusted Publishing (GitHub OIDC, `id-token: write`);
+# there is no registry token secret. Both jobs are disabled until the operator
+# sets the repository variable RELEASE_PLZ_ENABLED to `true`, so merging this
+# file cannot publish anything. crates.io trusted publishers are bound to this
+# filename: renaming the file breaks publishing until the publisher is updated.
+name: Release-plz
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  release-plz-release:
+    name: Release-plz release
+    if: ${{ vars.RELEASE_PLZ_ENABLED == 'true' && github.repository == 'rjwalters/faier' }}
+    runs-on: ubuntu-latest
+    permissions:
+      # Push tags and create GitHub Releases.
+      contents: write
+      # Find the release PR associated with the pushed commit.
+      pull-requests: read
+      # crates.io Trusted Publishing (OIDC token exchange).
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          # release-plz pushes branches and tags through the GitHub API with
+          # GITHUB_TOKEN, not with git, so the checkout keeps no credentials
+          # (release-plz docs, "Persist credentials"; tags are not signed).
+          persist-credentials: false
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master (2026-10-01)
+        with:
+          toolchain: stable
+      - name: Run release-plz release
+        uses: release-plz/action@b8d6b54b02889ff2ae2bb82e8b57c3a8fc1683a5 # v0.5.139
+        with:
+          command: release
+          version: "0.3.169"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  release-plz-pr:
+    name: Release-plz PR
+    if: ${{ vars.RELEASE_PLZ_ENABLED == 'true' && github.repository == 'rjwalters/faier' }}
+    runs-on: ubuntu-latest
+    permissions:
+      # Push the release PR branch.
+      contents: write
+      # Open and update the release PR.
+      pull-requests: write
+    # One release-pr run at a time; queued runs wait instead of being cancelled.
+    concurrency:
+      group: release-plz-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          # release-plz pushes branches and tags through the GitHub API with
+          # GITHUB_TOKEN, not with git, so the checkout keeps no credentials
+          # (release-plz docs, "Persist credentials"; tags are not signed).
+          persist-credentials: false
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master (2026-10-01)
+        with:
+          toolchain: stable
+      - name: Run release-plz release-pr
+        uses: release-plz/action@b8d6b54b02889ff2ae2bb82e8b57c3a8fc1683a5 # v0.5.139
+        with:
+          command: release-pr
+          version: "0.3.169"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
