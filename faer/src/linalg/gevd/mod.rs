@@ -318,10 +318,8 @@ fn compute_gevd_generic<T: ComplexField>(
 		{ alpha_re }.fill(nan());
 		{ alpha_im }.fill(nan());
 		{ beta }.fill(nan());
-		for u in [u_left, u_right] {
-			if let Some(mut u) = u {
-				u.fill(nan());
-			}
+		for mut u in [u_left, u_right].into_iter().flatten() {
+			u.fill(nan());
 		}
 		return Err(GevdError::NoConvergence);
 	}
@@ -1776,7 +1774,11 @@ mod t {
 					gevd(&a, &b, false).iter().filter(|l| l.1 != 0.0).count();
 			}
 		}
-		assert_eq!(bad_novec, 0, "eigenvalues-only path is wrong");
+		assert_eq!(
+			bad_novec, 0,
+			"eigenvalues-only path is wrong ({bad_novec} of {total})"
+		);
+		assert_eq!(bad_vec, 0, "eigenvector path is wrong ({bad_vec})");
 	}
 
 	/// BUG 2: `gevd_scratch` under-allocates, so `gevd_real` panics inside
@@ -1792,6 +1794,9 @@ mod t {
 				panics += 1;
 			}
 		}
-		assert_eq!(panics, 0, "gevd_scratch under-allocates");
+		assert_eq!(
+			panics, 0,
+			"gevd_scratch under-allocates ({panics} of {total})"
+		);
 	}
 }

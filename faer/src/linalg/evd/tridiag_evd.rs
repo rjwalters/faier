@@ -650,7 +650,7 @@ pub(crate) fn divide_and_conquer<T: RealField>(
 		qr_fallback_threshold,
 	);
 	if scale != one::<T>() {
-		let ref inv = scale.recip();
+		let inv = &scale.recip();
 		for i in 0..n {
 			diag[i] *= inv;
 		}
@@ -660,8 +660,8 @@ pub(crate) fn divide_and_conquer<T: RealField>(
 /// power of two `s` such that `s * max` lies in `[1/2, 2)`, or `1` if `max` is
 /// zero, non-finite, or so small that `s` would overflow
 fn pow2_unit_scale<T: RealField>(max: T) -> T {
-	let ref two = from_f64::<T>(2.0);
-	let ref half = from_f64::<T>(0.5);
+	let two = &from_f64::<T>(2.0);
+	let half = &from_f64::<T>(0.5);
 	let mut s = one::<T>();
 	if !(max.is_finite() && max > zero()) {
 		return s;

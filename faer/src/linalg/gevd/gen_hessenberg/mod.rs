@@ -1041,8 +1041,8 @@ mod make_givens_tests {
 	use std::assert;
 
 	const EPS: f64 = f64::EPSILON;
-	/// smallest positive subnormal
-	const TINY: f64 = 4.9406564584124654e-324;
+	/// smallest positive subnormal (2^-1074 ~ 4.94e-324)
+	const TINY: f64 = 5e-324;
 	/// error bounds, in units of `EPS` (relative) and `TINY` (absolute, for
 	/// subnormal intermediates)
 	const K_EPS: f64 = 4.0;
