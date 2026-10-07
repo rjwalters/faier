@@ -276,7 +276,11 @@ fn main() -> Result<(), Box<dyn core::error::Error>> {
 	let par = Par::Seq;
 
 	// symbolic factorization
-	let symbolic = linalg::lu::factorize_symbolic_lu(B.symbolic(), default())?;
+	let symbolic = linalg::lu::factorize_symbolic_lu(
+		B.symbolic(),
+		linalg::lu::LuColOrdering::Colamd,
+		default(),
+	)?;
 	let mut numeric = linalg::lu::NumericLu::new();
 
 	// computing allocation size

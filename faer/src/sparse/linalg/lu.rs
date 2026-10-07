@@ -2216,6 +2216,13 @@ impl<I: Index> SymbolicLu<I> {
 }
 /// computes the symbolic $LU$ factorization of the matrix $A$, or returns an
 /// error if the operation could not be completed
+///
+/// `ord` selects the fill-reducing column ordering (see [`LuColOrdering`]).
+///
+/// # panics
+/// panics if `A` is not square, or if `ord` is [`LuColOrdering::Custom`] and
+/// its order is not a permutation of `0..A.ncols()` (wrong length,
+/// out-of-range entry or duplicate entry)
 #[track_caller]
 pub fn factorize_symbolic_lu<I: Index>(
 	A: SymbolicSparseColMatRef<'_, I>,
@@ -2284,12 +2291,32 @@ pub fn factorize_symbolic_lu<I: Index>(
 			// (new -> old), i.e. the *forward* column permutation. we build the
 			// inverse (old -> new) ourselves so the caller cannot supply the
 			// flipped orientation, which stays correct but maximizes fill. the
-			// `PermRef::new_checked` below validates that this is a genuine
-			// permutation (bounds + fwd/inv consistency).
-			assert!(new_to_old.len() == n);
+			// `PermRef::new_checked` below re-validates that this is a genuine
+			// permutation (bounds + fwd/inv consistency); the explicit checks
+			// here give an LU caller a clear panic message instead.
+			assert!(
+				new_to_old.len() == n,
+				"LuColOrdering::Custom: order has length {}, expected {n}",
+				new_to_old.len(),
+			);
+			// `n` is used as the "not yet seen" sentinel for duplicate
+			// detection; it never collides with a valid entry `< n`.
+			let unseen = I::truncate(n);
+			col_perm_inv.fill(unseen);
 			for (new, &old) in new_to_old.iter().enumerate() {
 				let old = old.zx();
-				assert!(old < n);
+				assert!(
+					old < n,
+					"LuColOrdering::Custom: order[{new}] = {old} is out of \
+					 range for {n} columns",
+				);
+				assert!(
+					col_perm_inv[old] == unseen,
+					"LuColOrdering::Custom: column {old} appears more than \
+					 once (at order[{}] and order[{new}]); the order must be \
+					 a permutation of 0..{n}",
+					col_perm_inv[old].zx(),
+				);
 				col_perm_fwd[new] = I::truncate(old);
 				col_perm_inv[old] = I::truncate(new);
 			}
