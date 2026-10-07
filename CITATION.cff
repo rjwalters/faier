@@ -1,5 +1,8 @@
 # This CITATION.cff file was generated with cffinit.
 # Visit https://bit.ly/cffinit to generate yours today!
+#
+# This metadata describes upstream faer-rs and credits its author. faier
+# (https://github.com/rjwalters/faier) is a derivative fork; please cite upstream.
 
 cff-version: 1.2.0
 title: faer-rs
