@@ -57,15 +57,17 @@ Example values: `X.Y.Z` is the new upstream version; `NEW` stands for the tag `f
 2. **Fetch the tag and cross-check it.**
 
    ```sh
+   git fetch origin
    git fetch upstream --tags
    git ls-remote --tags upstream 'faer-v*' | sed 's#.*refs/tags/##; s#\^{}##' | sort -uV | tail -3   # newest tags
    git rev-parse 'faer-vX.Y.Z^{commit}'
-   git ls-remote upstream-codeberg 'refs/tags/faer-vX.Y.Z^{}'   # must print the same SHA
+   git ls-remote upstream-codeberg 'refs/tags/faer-vX.Y.Z' 'refs/tags/faer-vX.Y.Z^{}' \
+     | awk '{c = $1} /\^\{\}$/ {p = $1} END {print (p != "" ? p : c)}'   # must print the same SHA
    ```
 
-   If the SHAs differ, stop and find out why before merging.
+   The `git fetch origin` makes step 3 branch from the current `main`. The cross-check compares commits, not tag objects: an annotated tag has a `^{}` line with the commit it points to, a lightweight tag has only the plain line, which is already the commit, and the `awk` prints the `^{}` SHA if there is one, else the plain one. If the SHAs differ, or the `ls-remote` command prints nothing (the tag is missing on Codeberg), stop and find out why before merging.
 
-3. **Branch.** `git switch -c sync/faer-vX.Y.Z origin/main`
+3. **Branch.** `git switch -c sync/faer-vX.Y.Z origin/main` (after the `git fetch origin` in step 2).
 
 4. **Merge.** `git merge --no-ff faer-vX.Y.Z -m "Merge upstream faer-vX.Y.Z"`. Resolve conflicts with these points in mind:
    - Keep the renames in each `Cargo.toml`. Package names stay `faier` / `faier-traits`, and the library names stay `faer` / `faer_traits` through the `[lib] name = ...` sections. Path dependencies use `package = "faier"` / `package = "faier-traits"` (in `faer/`, `faer-ffi/` and `faer-no-std-test/`). `description` and `repository` stay the fork's. Set each `version` by the version rule below.
@@ -91,7 +93,7 @@ Example values: `X.Y.Z` is the new upstream version; `NEW` stands for the tag `f
    - Under **Upstream base**, record the new tag and its commit SHA (`git rev-parse --short 'faer-vX.Y.Z^{commit}'`).
    - Change the version on the crate-rename row to the new upstream version `X.Y.Z`: the rename is reapplied on each base. Leave the version on every other row alone. Each one names the `faier` release that shipped it, or stays `unreleased` until a release ships it (see "Adding a fork change"); a sync does not change that.
    - **Drop rows that upstream has fixed.** First check that the upstream code fixes the bug: with the fork's change reverted to upstream's code, the row's test must still pass. Then delete the row. Delete the fork's version of the code, but keep its `fork_*` test as a regression guard. Upstream may fix a bug differently, so a missing conflict does not prove the fix is in.
-   - Cherry-picked rows: run `git merge-base --is-ancestor 7628d92 faer-vX.Y.Z && echo contained`. If the tag contains the commit, the row for `fix.gevd-313` is no longer a fork change, so drop it.
+   - Cherry-picked rows: run `git cherry faer-vX.Y.Z 7628d92 7628d92^`. It compares patches, so it also finds the fix if upstream squashed or rebased it before tagging. No output (the tag contains `7628d92` itself) or a line starting with `-` (the tag has an equivalent change) means the row for `fix.gevd-313` is no longer a fork change, so drop it. A line starting with `+` means no identical patch is in the tag; upstream may still have fixed the bug with different code, so apply the "drop rows that upstream has fixed" check above before keeping the row.
 
 7. **Open a PR.** Push `sync/faer-vX.Y.Z` to `origin` and open a PR against `main`, with the fork-test output in the description. **Land it with a merge commit, not squash or rebase**, or the tag stops being an ancestor of `main`. After it lands, `git merge-base --is-ancestor faer-vX.Y.Z origin/main` must succeed.
 
@@ -104,7 +106,7 @@ Every change carried on top of upstream needs both of these:
 
 ### Watching for new releases
 
-`.github/workflows/upstream-tag-watch.yml` runs weekly and on demand (`workflow_dispatch`). It compares the newest `faer-v*` tag on the GitHub mirror with the tag under **Upstream base**. If upstream is newer, it opens an issue in this repo, unless an open issue for that tag already exists. It only reads from upstream.
+`.github/workflows/upstream-tag-watch.yml` runs weekly and on demand (`workflow_dispatch`). It compares the newest `faer-v*` tag on the GitHub mirror with the tag under **Upstream base**. If upstream is newer, it opens an issue titled `Sync upstream faer-vX.Y.Z` in this repo, unless an issue with exactly that title already exists, open or closed. A closed issue counts as handled: to skip a release deliberately, close its issue and the watcher will not reopen or recreate it. It only reads from upstream.
 
 ## Releases
 

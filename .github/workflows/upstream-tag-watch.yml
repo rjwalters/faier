@@ -34,7 +34,8 @@ jobs:
             echo "Up to date."; exit 0
           fi
           title="Sync upstream $latest"
-          existing=$(gh issue list -R "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" --json title -q ".[] | select(.title == \"$title\") | .title")
-          if [ -n "$existing" ]; then echo "Issue already open: $title"; exit 0; fi
+          # Open or closed: a closed issue means the release was handled or skipped on purpose.
+          existing=$(gh issue list -R "$GITHUB_REPOSITORY" --state all --limit 100 --search "\"$title\" in:title" --json title -q ".[] | select(.title == \"$title\") | .title")
+          if [ -n "$existing" ]; then echo "Issue already exists (open or closed): $title"; exit 0; fi
           gh issue create -R "$GITHUB_REPOSITORY" --title "$title" \
             --body "Upstream published \`$latest\`; the fork is based on \`$base\`. Follow FORK.md \"Syncing upstream\"."
