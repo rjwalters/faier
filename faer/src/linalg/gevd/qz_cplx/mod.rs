@@ -892,6 +892,7 @@ fn aggressive_early_deflation<T: ComplexField>(
 	mut beta: ColMut<'_, T>,
 	mut QC: MatMut<'_, T>,
 	mut ZC: MatMut<'_, T>,
+	rec: usize,
 	par: Par,
 	params: GeneralizedSchurParams,
 	stack: &mut MemStack,
@@ -935,6 +936,7 @@ fn aggressive_early_deflation<T: ComplexField>(
 		alpha.rb_mut(),
 		beta.rb_mut(),
 		false,
+		rec + 1,
 		par,
 		params,
 		stack,
@@ -1091,11 +1093,29 @@ pub fn hessenberg_to_qz_scratch<T: ComplexField>(
 	par: Par,
 	params: GeneralizedSchurParams,
 ) -> StackReq {
+	hessenberg_to_qz_blocked_scratch::<T>(n, 0, par, params)
+}
+/// recursion depth at which the deflation window qz switches to the unblocked
+/// algorithm (lapack `xlaqz0`'s `rec >= 2`)
+const MAX_AED_RECURSION: usize = 2;
+/// largest deflation window the blocked qz may request for a pencil of
+/// dimension `n`: the recommended window is capped at `(n - 3) / 3`, but an
+/// active block smaller than `nmin` is deflated with a window covering the
+/// whole block, as in lapack `xlaqz0`
+fn aed_window_bound(n: usize, nmin: usize) -> usize {
+	Ord::min(n, Ord::max((n - 3) / 3, nmin))
+}
+fn hessenberg_to_qz_blocked_scratch<T: ComplexField>(
+	n: usize,
+	rec: usize,
+	par: Par,
+	params: GeneralizedSchurParams,
+) -> StackReq {
 	let nmin = Ord::max(15, params.blocking_threshold);
-	if n < nmin {
+	if n < nmin || rec >= MAX_AED_RECURSION {
 		return StackReq::EMPTY;
 	}
-	let nw = (n - 3) / 3;
+	let nw = aed_window_bound(n, nmin);
 	let nsr = (params.recommended_shift_count)(n, n);
 	let rcost = (params.relative_cost_estimate_of_shift_chase_to_matmul)(n, n);
 	let itemp1 = (nsr as f64
@@ -1109,7 +1129,7 @@ pub fn hessenberg_to_qz_scratch<T: ComplexField>(
 		StackReq::all_of(&[
 			qc_aed,
 			qc_aed,
-			aed_scratch::<T>(n, nw, par, params),
+			aed_scratch::<T>(n, nw, rec, par, params),
 		]),
 		StackReq::all_of(&[
 			qc_sweep,
@@ -1124,11 +1144,12 @@ fn multishift_sweep_scratch<T: ComplexField>(n: usize, ns: usize) -> StackReq {
 fn aed_scratch<T: ComplexField>(
 	n: usize,
 	nw: usize,
+	rec: usize,
 	par: Par,
 	params: GeneralizedSchurParams,
 ) -> StackReq {
 	StackReq::any_of(&[
-		hessenberg_to_qz_scratch::<T>(nw, par, params),
+		hessenberg_to_qz_blocked_scratch::<T>(nw, rec + 1, par, params),
 		linalg::temp_mat_scratch::<T>(nw, n),
 		linalg::temp_mat_scratch::<T>(n, nw),
 	])
@@ -1188,6 +1209,7 @@ pub fn hessenberg_to_qz<T: ComplexField>(
 		alpha,
 		beta,
 		eigvals_only,
+		0,
 		par,
 		params,
 		stack,
@@ -1203,6 +1225,7 @@ fn hessenberg_to_qz_blocked<T: ComplexField>(
 	alpha: ColMut<'_, T>,
 	beta: ColMut<'_, T>,
 	eigvals_only: bool,
+	rec: usize,
 	par: Par,
 	params: GeneralizedSchurParams,
 	stack: &mut MemStack,
@@ -1235,7 +1258,7 @@ fn hessenberg_to_qz_blocked<T: ComplexField>(
 			.sqrt()) as usize;
 	let itemp1 = (itemp1.saturating_sub(1) / 4) * 4 + 4;
 	let nbr = &nsr + &itemp1;
-	if n < nmin {
+	if n < nmin || rec >= MAX_AED_RECURSION {
 		hessenberg_to_qz_unblocked(
 			ilo,
 			ihi,
@@ -1250,6 +1273,11 @@ fn hessenberg_to_qz_blocked<T: ComplexField>(
 		return;
 	}
 	let nw_max = (n - 3) / 3;
+	// the recommended window is capped up front; the whole-block window
+	// chosen below for small active blocks is not, otherwise the window can
+	// never cover the block, no sweep runs (the block is below `nmin`) and
+	// the loop spins on aed until it exhausts `maxit` (lapack `xlaqz0`)
+	let nwr = Ord::min(nwr, nw_max);
 	for iter in 0..maxit {
 		_ = iter;
 		if istop == usize::MAX || istart + 1 >= istop {
@@ -1420,7 +1448,6 @@ fn hessenberg_to_qz_blocked<T: ComplexField>(
 				nw = istop + 1 - istart2;
 			}
 		}
-		nw = Ord::min(nw, nw_max);
 		let (n_undeflated, n_deflated);
 		{
 			let (mut QC, stack) =
@@ -1442,6 +1469,7 @@ fn hessenberg_to_qz_blocked<T: ComplexField>(
 				beta.rb_mut(),
 				QC.rb_mut(),
 				ZC.rb_mut(),
+				rec,
 				par,
 				params,
 				stack,
@@ -1651,6 +1679,7 @@ mod tests {
 					alpha.as_mut(),
 					beta.as_mut(),
 					false,
+					0,
 					Par::Seq,
 					auto!(c64),
 					MemStack::new(&mut MemBuffer::new(
