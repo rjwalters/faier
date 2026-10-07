@@ -142,7 +142,8 @@ fn lartg<T: ComplexField>(f: T, g: T) -> (T::Real, T, T) {
 		}
 	} else {
 		// `f2 / h2 <= min_positive` may be subnormal, and `h2 / f2` may
-		// overflow, but `sqrt(min_positive) <= sqrt(f2 h2) <= sqrt(max_positive)`
+		// overflow, but `sqrt(min_positive) <= sqrt(f2 h2) <=
+		// sqrt(max_positive)`
 		let d = (&f2 * &h2).sqrt();
 		c = &f2 / &d;
 		if c >= safmin {

@@ -1728,7 +1728,8 @@ fn hessenberg_to_qz_blocked<T: RealField>(
 		if !active_block_is_finite(A.rb(), B.rb(), istart, istop) {
 			// a non-finite iterate never deflates: stop now instead of running
 			// out the remaining sweeps, and report the failure as NaN
-			// eigenvalues (`gevd_*` turns these into `GevdError::NoConvergence`)
+			// eigenvalues (`gevd_*` turns these into
+			// `GevdError::NoConvergence`)
 			alphar.fill(nan());
 			alphai.fill(nan());
 			beta.fill(nan());

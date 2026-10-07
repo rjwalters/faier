@@ -29,12 +29,8 @@ jobs:
           toolchain: nightly-2026-06-09
           components: clippy, rustfmt
 
-      # Non-gating for now: `cargo fmt --all -- --check` reports diffs in
-      # fork-added code (tracked in #9). Make it gate
-      # once the tree is formatted.
       - name: Formatting check
         run: cargo fmt --all -- --check
-        continue-on-error: true
 
       - name: Linting check
         run: cargo clippy --all-targets

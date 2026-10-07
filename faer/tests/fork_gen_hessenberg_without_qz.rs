@@ -26,6 +26,7 @@ impl Lcg {
 			.wrapping_add(1442695040888963407);
 		((self.0 >> 11) as f64) / ((1u64 << 53) as f64) - 0.5
 	}
+
 	fn cplx(&mut self) -> c64 {
 		c64::new(self.next(), self.next())
 	}

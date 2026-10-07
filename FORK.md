@@ -88,7 +88,7 @@ Example values: `X.Y.Z` is the new upstream version; `NEW` stands for the tag `f
 
      After the merge, check that the other manifests agree with the chosen versions: the `faier` dependency in `faer-ffi/Cargo.toml` (`version = "..."`), the `faier` dependency in `faer-no-std-test/Cargo.toml` (path only today; if upstream adds a `version`, it must match), and the `faier-traits` `version = "..."` requirement in `faer/Cargo.toml`. Then `cargo metadata --format-version 1 >/dev/null` must succeed, and `grep -A1 'name = "faier' Cargo.lock` must show only the chosen versions. Let cargo regenerate `Cargo.lock`; do not hand-edit it.
 
-5. **Test.** Run the fork regression tests above, then the usual checks: `cargo fmt --all -- --check`, `cargo clippy --workspace`, and `cargo test -p faier` (or `cargo nextest run`, which CI uses). Every fork test must still pass.
+5. **Test.** Run the fork regression tests above, then the usual checks: `cargo +nightly-2026-06-09 fmt --all -- --check` (the toolchain `code-quality.yml` pins; `rustfmt.toml` needs a nightly rustfmt, and CI fails on any diff), `cargo clippy --workspace`, and `cargo test -p faier` (or `cargo nextest run`, which CI uses). Every fork test must still pass.
 
 6. **Update this file.**
    - Under **Upstream base**, record the new tag and its commit SHA (`git rev-parse --short 'faer-vX.Y.Z^{commit}'`).
@@ -104,6 +104,8 @@ Every change carried on top of upstream needs both of these:
 
 1. A row in the table above, with version `unreleased` until it ships, saying what changed and what it resolves.
 2. A regression test: `faer/tests/fork_<topic>.rs` if the code can be reached through the public API. Otherwise use a unit test module inside the crate, and add its filter to the fork-test command above.
+
+Whole-tree reformat commits are listed in `.git-blame-ignore-revs`. GitHub's blame view skips them; for local `git blame`, run `git config blame.ignoreRevsFile .git-blame-ignore-revs` once per clone.
 
 ### Watching for new releases
 
