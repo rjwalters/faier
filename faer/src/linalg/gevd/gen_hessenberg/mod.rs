@@ -994,7 +994,10 @@ mod make_givens_tests {
 		assert!(c.is_finite() && s.re.is_finite() && s.im.is_finite());
 		assert!(r.re.is_finite() && r.im.is_finite());
 		let unit = c * c + s.norm_sqr();
-		assert!((unit - 1.0).abs() <= 8.0 * f64::EPSILON, "{f:?} {g:?}: {unit}");
+		assert!(
+			(unit - 1.0).abs() <= 8.0 * f64::EPSILON,
+			"{f:?} {g:?}: {unit}"
+		);
 		// `[c, s; -conj(s), c] [f; g] = [r; 0]`, up to rounding (with an
 		// absolute floor for subnormal inputs)
 		let tol = 8.0 * f64::EPSILON * f.norm().max(g.norm()) + SUBNORMAL_FLOOR;
@@ -1017,11 +1020,21 @@ mod make_givens_tests {
 
 	#[test]
 	fn givens_is_finite_and_unitary_across_the_exponent_range() {
-		for scale in [1.0, 1e-140, 1e-160, 1e-200, 1e-300, 1e-310, 1e140, 1e160, 1e300]
-		{
-			check_cplx(c64::new(0.3, -0.4) * scale, c64::new(-1.2, 0.5) * scale);
-			check_cplx(c64::new(1.0, 0.0) * scale, c64::new(1e-30, 2e-30) * scale);
-			check_cplx(c64::new(1e-30, 0.0) * scale, c64::new(0.0, 1.0) * scale);
+		for scale in [
+			1.0, 1e-140, 1e-160, 1e-200, 1e-300, 1e-310, 1e140, 1e160, 1e300,
+		] {
+			check_cplx(
+				c64::new(0.3, -0.4) * scale,
+				c64::new(-1.2, 0.5) * scale,
+			);
+			check_cplx(
+				c64::new(1.0, 0.0) * scale,
+				c64::new(1e-30, 2e-30) * scale,
+			);
+			check_cplx(
+				c64::new(1e-30, 0.0) * scale,
+				c64::new(0.0, 1.0) * scale,
+			);
 			check_real(0.3 * scale, -1.2 * scale);
 			check_real(1e-30 * scale, 1.0 * scale);
 			check_real(-1.0 * scale, 1e-30 * scale);

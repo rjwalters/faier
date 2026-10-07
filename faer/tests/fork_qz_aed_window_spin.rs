@@ -45,7 +45,11 @@ fn null_cluster_pencil() -> (Mat<c64>, Mat<c64>, Vec<c64>, usize) {
 	let dk: Vec<c64> = (0..n)
 		.map(|i| {
 			c64::new(
-				if i < n_null { 0.0 } else { 1.0 + 50.0 * (rng.next() + 0.5) },
+				if i < n_null {
+					0.0
+				} else {
+					1.0 + 50.0 * (rng.next() + 0.5)
+				},
 				0.0,
 			)
 		})
@@ -67,7 +71,11 @@ fn null_cluster_pencil() -> (Mat<c64>, Mat<c64>, Vec<c64>, usize) {
 }
 
 /// eigenvalues and wall time of `gevd_cplx` with the given blocking threshold
-fn solve(a: &Mat<c64>, b: &Mat<c64>, blocking_threshold: Option<usize>) -> (Vec<c64>, f64) {
+fn solve(
+	a: &Mat<c64>,
+	b: &Mat<c64>,
+	blocking_threshold: Option<usize>,
+) -> (Vec<c64>, f64) {
 	let n = a.nrows();
 	let (mut a, mut b) = (a.clone(), b.clone());
 	let mut params: GevdParams = <GevdParams as faer::Auto<c64>>::auto();
@@ -111,7 +119,8 @@ fn blocked_complex_qz_is_accurate_and_not_slower_than_unblocked() {
 	assert!(got.iter().all(|l| l.re.is_finite() && l.im.is_finite()));
 	let null = got.iter().filter(|l| l.norm() < 1e-7).count();
 	assert_eq!(null, n_null, "null cluster size");
-	let mut phys: Vec<c64> = got.into_iter().filter(|l| l.norm() >= 1e-7).collect();
+	let mut phys: Vec<c64> =
+		got.into_iter().filter(|l| l.norm() >= 1e-7).collect();
 	phys.sort_by(|x, y| x.norm().total_cmp(&y.norm()));
 	want.sort_by(|x, y| x.norm().total_cmp(&y.norm()));
 	let err = phys

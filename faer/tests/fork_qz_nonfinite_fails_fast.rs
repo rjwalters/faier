@@ -18,7 +18,10 @@ use std::time::{Duration, Instant};
 /// The fixed loop returns at once; the unfixed one runs `30 n` sweeps
 const BUDGET: Duration = Duration::from_secs(30);
 
-fn with_watchdog<T: Send + 'static>(what: &str, f: impl FnOnce() -> T + Send + 'static) -> T {
+fn with_watchdog<T: Send + 'static>(
+	what: &str,
+	f: impl FnOnce() -> T + Send + 'static,
+) -> T {
 	let (tx, rx) = mpsc::channel();
 	let start = Instant::now();
 	std::thread::spawn(move || {
@@ -96,26 +99,29 @@ fn poisoned_pair_real(rng: &mut Lcg) -> (Mat<f64>, Mat<f64>) {
 fn complex_qz_stops_on_a_nonfinite_iterate() {
 	let mut rng = Lcg(0x908);
 	let (mut a, mut b) = poisoned_pair_cplx(&mut rng);
-	let (alpha, beta) = with_watchdog("complex qz", move || {
-		let params: GeneralizedSchurParams =
-			<GeneralizedSchurParams as faer::Auto<c64>>::auto();
-		let mut buf = MemBuffer::new(qz_cplx::hessenberg_to_qz_scratch::<c64>(N, Par::Seq, params));
-		let mut alpha = Col::<c64>::zeros(N);
-		let mut beta = Col::<c64>::zeros(N);
-		qz_cplx::hessenberg_to_qz(
-			a.as_mut(),
-			b.as_mut(),
-			None,
-			None,
-			alpha.as_mut(),
-			beta.as_mut(),
-			ComputeEigenvectors::No,
-			Par::Seq,
-			params,
-			MemStack::new(&mut buf),
-		);
-		(alpha, beta)
-	});
+	let (alpha, beta) =
+		with_watchdog("complex qz", move || {
+			let params: GeneralizedSchurParams =
+				<GeneralizedSchurParams as faer::Auto<c64>>::auto();
+			let mut buf = MemBuffer::new(qz_cplx::hessenberg_to_qz_scratch::<
+				c64,
+			>(N, Par::Seq, params));
+			let mut alpha = Col::<c64>::zeros(N);
+			let mut beta = Col::<c64>::zeros(N);
+			qz_cplx::hessenberg_to_qz(
+				a.as_mut(),
+				b.as_mut(),
+				None,
+				None,
+				alpha.as_mut(),
+				beta.as_mut(),
+				ComputeEigenvectors::No,
+				Par::Seq,
+				params,
+				MemStack::new(&mut buf),
+			);
+			(alpha, beta)
+		});
 	assert!(
 		(0..N).any(|i| !(alpha[i].re.is_finite() && beta[i].re.is_finite())),
 		"a breakdown must be reported through non-finite eigenvalues"
@@ -126,28 +132,31 @@ fn complex_qz_stops_on_a_nonfinite_iterate() {
 fn real_qz_stops_on_a_nonfinite_iterate() {
 	let mut rng = Lcg(0x909);
 	let (mut a, mut b) = poisoned_pair_real(&mut rng);
-	let (alphar, beta) = with_watchdog("real qz", move || {
-		let params: GeneralizedSchurParams =
-			<GeneralizedSchurParams as faer::Auto<f64>>::auto();
-		let mut buf = MemBuffer::new(qz_real::hessenberg_to_qz_scratch::<f64>(N, Par::Seq, params));
-		let mut alphar = Col::<f64>::zeros(N);
-		let mut alphai = Col::<f64>::zeros(N);
-		let mut beta = Col::<f64>::zeros(N);
-		qz_real::hessenberg_to_qz(
-			a.as_mut(),
-			b.as_mut(),
-			None,
-			None,
-			alphar.as_mut(),
-			alphai.as_mut(),
-			beta.as_mut(),
-			ComputeEigenvectors::No,
-			Par::Seq,
-			params,
-			MemStack::new(&mut buf),
-		);
-		(alphar, beta)
-	});
+	let (alphar, beta) =
+		with_watchdog("real qz", move || {
+			let params: GeneralizedSchurParams =
+				<GeneralizedSchurParams as faer::Auto<f64>>::auto();
+			let mut buf = MemBuffer::new(qz_real::hessenberg_to_qz_scratch::<
+				f64,
+			>(N, Par::Seq, params));
+			let mut alphar = Col::<f64>::zeros(N);
+			let mut alphai = Col::<f64>::zeros(N);
+			let mut beta = Col::<f64>::zeros(N);
+			qz_real::hessenberg_to_qz(
+				a.as_mut(),
+				b.as_mut(),
+				None,
+				None,
+				alphar.as_mut(),
+				alphai.as_mut(),
+				beta.as_mut(),
+				ComputeEigenvectors::No,
+				Par::Seq,
+				params,
+				MemStack::new(&mut buf),
+			);
+			(alphar, beta)
+		});
 	assert!(
 		(0..N).any(|i| !(alphar[i].is_finite() && beta[i].is_finite())),
 		"a breakdown must be reported through non-finite eigenvalues"

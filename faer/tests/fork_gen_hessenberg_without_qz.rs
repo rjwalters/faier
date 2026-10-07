@@ -87,7 +87,11 @@ fn blocked_reduction_without_q_and_z_matches_reduction_with_them() {
 	}
 }
 
-fn gevd_cplx_eigenvalues(a: &Mat<c64>, b: &Mat<c64>, vectors: bool) -> Vec<c64> {
+fn gevd_cplx_eigenvalues(
+	a: &Mat<c64>,
+	b: &Mat<c64>,
+	vectors: bool,
+) -> Vec<c64> {
 	let n = a.nrows();
 	let (mut a, mut b) = (a.clone(), b.clone());
 	let params: GevdParams = <GevdParams as faer::Auto<c64>>::auto();
