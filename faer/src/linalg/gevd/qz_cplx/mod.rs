@@ -1382,7 +1382,8 @@ fn hessenberg_to_qz_blocked<T: ComplexField>(
 		if !active_block_is_finite(A.rb(), B.rb(), istart, istop) {
 			// a non-finite iterate never deflates: stop now instead of running
 			// out the remaining sweeps, and report the failure as NaN
-			// eigenvalues (`gevd_*` turns these into `GevdError::NoConvergence`)
+			// eigenvalues (`gevd_*` turns these into
+			// `GevdError::NoConvergence`)
 			alpha.fill(nan());
 			beta.fill(nan());
 			return Err(ihi);
@@ -1909,7 +1910,8 @@ mod aed_window_spin_tests {
 		// alone runs out `30 n = 18000`)
 		assert!(
 			iterations <= 1000,
-			"{iterations} blocked qz iterations: the deflation-window spin is back"
+			"{iterations} blocked qz iterations: the deflation-window spin is \
+			 back"
 		);
 	}
 }
