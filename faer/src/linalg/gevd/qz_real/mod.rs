@@ -2080,7 +2080,7 @@ fn chase_bulge_2x2<T: RealField>(
 		let (c1, s1, temp) = make_givens(h[(0, 0)].copy(), h[(1, 0)].copy());
 		h[(0, 0)] = temp;
 		h[(1, 0)] = zero();
-		rot_rows(c1, s1, h.rb_mut(), 0, 1);
+		rot_rows(c1, s1, h.rb_mut().get_mut(.., 1..), 0, 1);
 		let (c1, s1, _) = make_givens(h[(1, 2)].copy(), h[(1, 1)].copy());
 		rot_cols(c1.copy(), s1.copy(), h.rb_mut().get_mut(..1, ..), 2, 1);
 		let (c2, s2, _) = make_givens(h[(0, 1)].copy(), h[(0, 0)].copy());
