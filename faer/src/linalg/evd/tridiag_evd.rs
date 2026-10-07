@@ -613,6 +613,82 @@ pub(crate) fn divide_and_conquer<T: RealField>(
 	stack: &mut MemStack,
 	qr_fallback_threshold: usize,
 ) -> Result<(), EvdError> {
+	let mut diag = diag;
+	let mut offdiag = offdiag;
+	let n = diag.nrows();
+	// the merge step deflates with `8 eps max(max|d|, max|z|)`, where `z` is
+	// built from unit eigenvectors, so the tolerance is only relative to the
+	// matrix when `max|T|` is O(1): for a small-norm `T` it is effectively the
+	// absolute `8 eps` and merges distinct eigenvalues. scale `T` by a power of
+	// two (exact, so the eigenvectors are unchanged) to bring its largest entry
+	// into `[1/2, 2)` first, then scale the eigenvalues back, as lapack's
+	// `xstedc` does
+	let scale = {
+		let mut max = zero::<T>();
+		for i in 0..n {
+			max = max.fmax(diag[i].abs());
+		}
+		for i in 0..n.saturating_sub(1) {
+			max = max.fmax(offdiag[i].abs());
+		}
+		pow2_unit_scale(max)
+	};
+	if scale != one::<T>() {
+		for i in 0..n {
+			diag[i] *= &scale;
+		}
+		for i in 0..n.saturating_sub(1) {
+			offdiag[i] *= &scale;
+		}
+	}
+	let r = divide_and_conquer_unscaled(
+		diag.rb_mut(),
+		offdiag.rb_mut(),
+		u,
+		par,
+		stack,
+		qr_fallback_threshold,
+	);
+	if scale != one::<T>() {
+		let ref inv = scale.recip();
+		for i in 0..n {
+			diag[i] *= inv;
+		}
+	}
+	r
+}
+/// power of two `s` such that `s * max` lies in `[1/2, 2)`, or `1` if `max` is
+/// zero, non-finite, or so small that `s` would overflow
+fn pow2_unit_scale<T: RealField>(max: T) -> T {
+	let ref two = from_f64::<T>(2.0);
+	let ref half = from_f64::<T>(0.5);
+	let mut s = one::<T>();
+	if !(max.is_finite() && max > zero()) {
+		return s;
+	}
+	let mut m = max;
+	while m >= *two {
+		m *= half;
+		s *= half;
+	}
+	while m < *half {
+		let next = &s * two;
+		if !next.is_finite() {
+			break;
+		}
+		m *= two;
+		s = next;
+	}
+	s
+}
+fn divide_and_conquer_unscaled<T: RealField>(
+	diag: ColMut<'_, T, usize, ContiguousFwd>,
+	offdiag: ColMut<'_, T, usize, ContiguousFwd>,
+	u: MatMut<'_, T, usize, usize>,
+	par: Par,
+	stack: &mut MemStack,
+	qr_fallback_threshold: usize,
+) -> Result<(), EvdError> {
 	let n = diag.nrows();
 	let (mut pl_before, stack) = stack.make_with(n, |_| 0usize);
 	let (mut pl_after, stack) = stack.make_with(n, |_| 0usize);
