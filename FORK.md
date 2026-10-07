@@ -57,27 +57,43 @@ Example values: `X.Y.Z` is the new upstream version; `NEW` stands for the tag `f
 2. **Fetch the tag and cross-check it.**
 
    ```sh
+   git fetch origin
    git fetch upstream --tags
    git ls-remote --tags upstream 'faer-v*' | sed 's#.*refs/tags/##; s#\^{}##' | sort -uV | tail -3   # newest tags
    git rev-parse 'faer-vX.Y.Z^{commit}'
-   git ls-remote upstream-codeberg 'refs/tags/faer-vX.Y.Z^{}'   # must print the same SHA
+   git ls-remote upstream-codeberg 'refs/tags/faer-vX.Y.Z' 'refs/tags/faer-vX.Y.Z^{}' \
+     | awk '{c = $1} /\^\{\}$/ {p = $1} END {print (p != "" ? p : c)}'   # must print the same SHA
    ```
 
-   If the SHAs differ, stop and find out why before merging.
+   The `git fetch origin` makes step 3 branch from the current `main`. The cross-check compares commits, not tag objects: an annotated tag has a `^{}` line with the commit it points to, a lightweight tag has only the plain line, which is already the commit, and the `awk` prints the `^{}` SHA if there is one, else the plain one. If the SHAs differ, or the `ls-remote` command prints nothing (the tag is missing on Codeberg), stop and find out why before merging.
 
-3. **Branch.** `git switch -c sync/faer-vX.Y.Z origin/main`
+3. **Branch.** `git switch -c sync/faer-vX.Y.Z origin/main` (after the `git fetch origin` in step 2).
 
 4. **Merge.** `git merge --no-ff faer-vX.Y.Z -m "Merge upstream faer-vX.Y.Z"`. Resolve conflicts with these points in mind:
-   - Keep the renames in each `Cargo.toml`. Package names stay `faier` / `faier-traits`, and the library names stay `faer` / `faer_traits` through the `[lib] name = ...` sections. Path dependencies use `package = "faier"` / `package = "faier-traits"` (in `faer/`, `faer-ffi/` and `faer-no-std-test/`). `description` and `repository` stay the fork's. Take upstream's new `version` numbers.
+   - Keep the renames in each `Cargo.toml`. Package names stay `faier` / `faier-traits`, and the library names stay `faer` / `faer_traits` through the `[lib] name = ...` sections. Path dependencies use `package = "faier"` / `package = "faier-traits"` (in `faer/`, `faer-ffi/` and `faer-no-std-test/`). `description` and `repository` stay the fork's. Set each `version` by the version rule below.
    - In code covered by a table row, keep the fork's behaviour unless upstream fixed the same bug. If it did, take upstream's code and handle the row in step 6.
+   - **Version rule.** Apply it separately to `faier` (`faer/Cargo.toml`) and `faier-traits` (`faer-traits/Cargo.toml`). Let F be the fork's current manifest version and U the version in upstream's tag. The new version is the higher of F and U by semver:
+     - U has a higher minor than F (a new upstream minor, e.g. `0.25.0`): take U. For `faier` this resets the patch.
+     - Same minor, U's patch is higher than F's: take U.
+     - Same minor, U's patch is equal to or lower than F's: keep F. Never move a version backwards; crates.io cannot reuse a published version.
+
+     `faier-traits` versions independently (see "Releases"), so its F and U usually differ from `faier`'s; apply the rule to its own pair. F may be a version that is not on crates.io yet: release-plz keeps an unpublished manifest version and never lowers one, so the rule and the next release PR agree. Examples for `faier`:
+
+     | Fork `faier` (F) | Upstream tag (U) | New `faier` version |
+     |---|---|---|
+     | `0.24.7` | `faer-v0.24.6` | `0.24.7` |
+     | `0.24.5` | `faer-v0.25.0` | `0.25.0` |
+     | `0.24.5` | `faer-v0.24.5` | `0.24.5` (the next release PR bumps it to `0.24.6`) |
+
+     After the merge, check that the other manifests agree with the chosen versions: the `faier` dependency in `faer-ffi/Cargo.toml` (`version = "..."`), the `faier` dependency in `faer-no-std-test/Cargo.toml` (path only today; if upstream adds a `version`, it must match), and the `faier-traits` `version = "..."` requirement in `faer/Cargo.toml`. Then `cargo metadata --format-version 1 >/dev/null` must succeed, and `grep -A1 'name = "faier' Cargo.lock` must show only the chosen versions. Let cargo regenerate `Cargo.lock`; do not hand-edit it.
 
 5. **Test.** Run the fork regression tests above, then the usual checks: `cargo fmt --all -- --check`, `cargo clippy --workspace`, and `cargo test -p faier` (or `cargo nextest run`, which CI uses). Every fork test must still pass.
 
 6. **Update this file.**
    - Under **Upstream base**, record the new tag and its commit SHA (`git rev-parse --short 'faer-vX.Y.Z^{commit}'`).
-   - Change the version on the crate-rename row, and on every `unreleased` row that ships with this sync, to the new version.
+   - Change the version on the crate-rename row to the new upstream version `X.Y.Z`: the rename is reapplied on each base. Leave the version on every other row alone. Each one names the `faier` release that shipped it, or stays `unreleased` until a release ships it (see "Adding a fork change"); a sync does not change that.
    - **Drop rows that upstream has fixed.** First check that the upstream code fixes the bug: with the fork's change reverted to upstream's code, the row's test must still pass. Then delete the row. Delete the fork's version of the code, but keep its `fork_*` test as a regression guard. Upstream may fix a bug differently, so a missing conflict does not prove the fix is in.
-   - Cherry-picked rows: run `git merge-base --is-ancestor 7628d92 faer-vX.Y.Z && echo contained`. If the tag contains the commit, the row for `fix.gevd-313` is no longer a fork change, so drop it.
+   - Cherry-picked rows: run `git cherry faer-vX.Y.Z 7628d92 7628d92^`. It compares patches, so it also finds the fix if upstream squashed or rebased it before tagging. No output (the tag contains `7628d92` itself) or a line starting with `-` (the tag has an equivalent change) means the row for `fix.gevd-313` is no longer a fork change, so drop it. A line starting with `+` means no identical patch is in the tag; upstream may still have fixed the bug with different code, so apply the "drop rows that upstream has fixed" check above before keeping the row.
 
 7. **Open a PR.** Push `sync/faer-vX.Y.Z` to `origin` and open a PR against `main`, with the fork-test output in the description. **Land it with a merge commit, not squash or rebase**, or the tag stops being an ancestor of `main`. After it lands, `git merge-base --is-ancestor faer-vX.Y.Z origin/main` must succeed.
 
@@ -90,7 +106,7 @@ Every change carried on top of upstream needs both of these:
 
 ### Watching for new releases
 
-`.github/workflows/upstream-tag-watch.yml` runs weekly and on demand (`workflow_dispatch`). It compares the newest `faer-v*` tag on the GitHub mirror with the tag under **Upstream base**. If upstream is newer, it opens an issue in this repo, unless an open issue for that tag already exists. It only reads from upstream.
+`.github/workflows/upstream-tag-watch.yml` runs weekly and on demand (`workflow_dispatch`). It compares the newest `faer-v*` tag on the GitHub mirror with the tag under **Upstream base**. If upstream is newer, it opens an issue titled `Sync upstream faer-vX.Y.Z` in this repo, unless an issue with exactly that title already exists, open or closed. A closed issue counts as handled: to skip a release deliberately, close its issue and the watcher will not reopen or recreate it. It only reads from upstream.
 
 ## Releases
 
@@ -99,7 +115,7 @@ Every change carried on top of upstream needs both of these:
 ### Versioning
 
 - **`faier` tracks upstream's minor and bumps the patch for fork releases.** The first release is `0.24.5` (upstream `faer-v0.24.4` plus the fixes in the table above). Further fork releases on the same base are `0.24.6`, `0.24.7`, and so on.
-- **A new upstream minor resets the patch.** When a sync brings in `faer-v0.25.0`, `faier` becomes `0.25.0` (the sync takes upstream's version, as in "Syncing upstream" step 4), and later fork releases are `0.25.1`, ….
+- **A new upstream minor resets the patch.** When a sync brings in `faer-v0.25.0`, `faier` becomes `0.25.0` (by the version rule in [Syncing upstream](#syncing-upstream), step 4), and later fork releases are `0.25.1`, ….
 - **Upstream patch releases do not set `faier`'s patch.** After a sync of an upstream patch release (say `faer-v0.24.6` while `faier` is already at `0.24.7`), keep the higher of the two versions and let the next release bump it, because crates.io cannot reuse a published version.
 - **`faier-traits` versions independently** (`0.24.0` now) and is bumped only when its own files change. `faier`'s `faer-traits = { …, version = "…" }` requirement follows it; release-plz updates that line.
 - Semver build metadata (`+fork.1`) is not used: cargo ignores it when resolving versions.
