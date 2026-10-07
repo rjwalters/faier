@@ -9,13 +9,17 @@ on:
 
 permissions:
   contents: read
-  issues: write
 
 jobs:
   watch:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write # gh issue create
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - name: Compare newest upstream tag with fork base
         env:
           GH_TOKEN: ${{ github.token }}
