@@ -1282,7 +1282,7 @@ extern crate self as faer;
 #[macro_export]
 #[doc(hidden)]
 macro_rules! simd_iter {
-	(for ($batch_id:tt, $i:pat $(,)?) in [$indices:expr; $batch_size:expr] $b:block $(,)?) => {#[allow(non_upper_case_globals, unconditional_panic)] 'out:{
+	(for ($batch_id:tt, $i:pat $(,)?) in [$indices:expr; $batch_size:expr] $b:block $(,)?) => {#[allow(non_upper_case_globals, unconditional_panic, clippy::out_of_bounds_indexing)] 'out:{
 		let (__head__, __body_batch__, __body_item__, __tail__) = &$indices;
 		let __body_batch__ = __body_batch__.clone();
 		let mut __body_item__ = __body_item__.clone();
