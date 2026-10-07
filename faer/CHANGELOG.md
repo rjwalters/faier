@@ -14,9 +14,9 @@ FORK.md, "Releases"). Upstream faer's history is in the repository's root
 ## [0.25.0]
 
 First crates.io release of `faier`, based on upstream `faer-v0.24.4`. It is a
-minor ahead of upstream because it contains a breaking API change (below); no
+minor ahead of upstream because it contains breaking API changes (below); no
 `0.24.x` version of `faier` exists. Code written against `faer 0.24` needs only
-the LU change below.
+the two sparse-factorization changes listed under "Changed".
 
 ### Added
 
@@ -28,8 +28,8 @@ the LU change below.
 
 ### Fixed
 
-- QZ (generalized eigendecomposition): aggressive early deflation index overflow, blocked generalized Hessenberg without `Z`, `make_givens` scaling for subnormal and extreme inputs, fail-fast on non-finite iterates anywhere in the active block (`GevdError::NoConvergence`), real double-shift bulge-chase accuracy, blocked deflation-window spin, an out-of-bounds panic on non-finite input to the real unblocked QZ, and `maxit` exhaustion on finite data now reported as `NoConvergence` instead of returning zero eigenvalues.
+- QZ (generalized eigendecomposition): aggressive early deflation index overflow, blocked generalized Hessenberg without `Z`, `make_givens` scaling for subnormal and extreme inputs, fail-fast on non-finite iterates anywhere in the active block (`GevdError::NoConvergence`), real double-shift bulge-chase accuracy, blocked deflation-window spin, an out-of-bounds panic on non-finite input to the real unblocked QZ, and `maxit` exhaustion on finite data now reported as `NoConvergence` instead of returning `alpha = beta = 0` (undefined `0 / 0` eigenvalues).
 - Tridiagonal divide and conquer: relative deflation tolerance for small-norm matrices.
-- `gevd_scratch` for `n = 2` with eigenvectors (cherry-picked upstream `fix.gevd-313`).
+- `gevd_scratch` for `n = 2` with eigenvectors, and the eigenvalues-only real QZ now writes both slots of a conjugate pair (cherry-picked upstream `fix.gevd-313`).
 
 See the `0.25.0` rows in FORK.md for details and regression tests.
