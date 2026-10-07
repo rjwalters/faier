@@ -1126,7 +1126,9 @@ fn hessenberg_to_qz_unblocked<T: RealField>(
 	// fix up eigenvalue pairs
 	let mut j = ilo;
 	while j <= ihi {
-		if alphai[j] == zero() {
+		// the non-finite fail-fast fills `alphai` with NaN, which is not a
+		// pair start; a pair can also never begin at the last slot
+		if alphai[j] == zero() || !alphai[j].is_finite() || j == ihi {
 			j += 1;
 		} else {
 			alphar[j + 1] = alphar[j].copy();

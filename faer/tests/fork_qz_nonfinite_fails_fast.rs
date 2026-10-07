@@ -162,3 +162,82 @@ fn real_qz_stops_on_a_nonfinite_iterate() {
 		"a breakdown must be reported through non-finite eigenvalues"
 	);
 }
+
+/// runs the real QZ on an `n x n` Hessenberg / triangular pair whose `(k, k)`
+/// entry of `A` is `poison`, returning `(alphar, alphai, beta)`
+fn real_qz_small(
+	n: usize,
+	k: usize,
+	poison: f64,
+	seed: u64,
+) -> (Col<f64>, Col<f64>, Col<f64>) {
+	let mut rng = Lcg(seed);
+	let mut a = Mat::<f64>::from_fn(n, n, |i, j| {
+		if i == k && j == k {
+			poison
+		} else if i <= j + 1 {
+			rng.next()
+		} else {
+			0.0
+		}
+	});
+	let mut b = Mat::<f64>::from_fn(n, n, |i, j| {
+		if i == j {
+			2.0 + rng.next()
+		} else if i < j {
+			rng.next()
+		} else {
+			0.0
+		}
+	});
+	let params: GeneralizedSchurParams =
+		<GeneralizedSchurParams as faer::Auto<f64>>::auto();
+	let mut buf = MemBuffer::new(qz_real::hessenberg_to_qz_scratch::<f64>(
+		n,
+		Par::Seq,
+		params,
+	));
+	let mut alphar = Col::<f64>::zeros(n);
+	let mut alphai = Col::<f64>::zeros(n);
+	let mut beta = Col::<f64>::zeros(n);
+	qz_real::hessenberg_to_qz(
+		a.as_mut(),
+		b.as_mut(),
+		None,
+		None,
+		alphar.as_mut(),
+		alphai.as_mut(),
+		beta.as_mut(),
+		ComputeEigenvectors::No,
+		Par::Seq,
+		params,
+		MemStack::new(&mut buf),
+	);
+	(alphar, alphai, beta)
+}
+
+/// below the blocked threshold the unblocked QZ runs, and its NaN fail-fast
+/// fills `alphai` with NaN; the conjugate-pair fix-up used to read
+/// `NaN != 0` as a pair start and step past the end of the block for odd
+/// sizes (index out of bounds). even sizes are the control.
+///
+/// an `inf` at `(0, 0)` is left out: it never reaches the trailing diagonal
+/// the unblocked fail-fast inspects (rjwalters/faier#6)
+#[test]
+fn real_unblocked_qz_nonfinite_does_not_overrun_small_odd_blocks() {
+	for n in [3usize, 4, 5, 7, 8] {
+		for (k, poison) in
+			[(0, f64::NAN), (n - 1, f64::NAN), (n - 1, f64::INFINITY)]
+		{
+			let (alphar, alphai, beta) =
+				real_qz_small(n, k, poison, 0x90a + n as u64);
+			assert!(
+				(0..n).any(|i| !(alphar[i].is_finite()
+					&& alphai[i].is_finite()
+					&& beta[i].is_finite())),
+				"n = {n}, poison {poison} at ({k}, {k}): a breakdown must be \
+				 reported through non-finite eigenvalues"
+			);
+		}
+	}
+}
