@@ -66,11 +66,20 @@ fn hessenberg_to_qz_unblocked<T: ComplexField>(
 	let ascale = safmin.fmax(&anorm).recip();
 	let bscale = safmin.fmax(&bnorm).recip();
 	if ihi >= ilo {
+		// a non-finite input entry anywhere in the block poisons the norms and
+		// tolerances above (an infinite `atol` deflates every subdiagonal and
+		// returns finite garbage) and need not ever reach the trailing diagonal
+		let input_is_finite =
+			H.rb().get(ilo..ihi + 1, ilo..ihi + 1).is_all_finite()
+				&& T.rb().get(ilo..ihi + 1, ilo..ihi + 1).is_all_finite();
 		'main_loop: for _ in 0..maxit {
-			if !(H[(ilast, ilast)].is_finite() && T[(ilast, ilast)].is_finite())
+			if !(input_is_finite
+				&& active_block_is_finite(H.rb(), T.rb(), ilo, ilast))
 			{
 				// a non-finite iterate never deflates: report NaN eigenvalues
 				// for the unconverged block instead of running out `maxit`
+				// (rjwalters/faier#6: checking only `(ilast, ilast)` missed a
+				// non-finite entry elsewhere in the active block)
 				for j in ilo..ilast + 1 {
 					alpha[j] = nan();
 					beta[j] = nan();
