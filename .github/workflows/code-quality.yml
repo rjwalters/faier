@@ -6,6 +6,9 @@ on:
 
 name: Assess Code Quality
 
+permissions:
+  contents: read
+
 jobs:
   code-quality:
     name: code-quality
@@ -13,13 +16,15 @@ jobs:
 
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       # Pinned so a new nightly clippy/rustfmt cannot turn CI red on its own.
       # This is the toolchain `cargo clippy --all-targets` was verified clean
       # on (rustc 1.98.0-nightly cb46fbb8c 2026-06-08). Bump deliberately.
       - name: Install toolchain
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master (2026-10-01)
         with:
           toolchain: nightly-2026-06-09
           components: clippy, rustfmt
