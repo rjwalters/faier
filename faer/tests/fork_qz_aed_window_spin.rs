@@ -11,13 +11,20 @@
 //! unblocked one from about 590 rows (where the shift count doubles). The
 //! window is now uncapped for small blocks and the deflation-window QZ drops
 //! to the unblocked algorithm at recursion depth 2, as in lapack `xlaqz0`.
+//!
+//! The spin itself is caught deterministically by the unit test
+//! `qz_cplx::aed_window_spin_tests`, which counts the blocked-loop iterations
+//! on this pencil (155 with the fix, 20259 without). This test
+//! checks the end-to-end accuracy of the blocked solve. It used to also assert
+//! that the blocked solve took at most twice as long as the unblocked one,
+//! but a wall-clock ratio of two back-to-back solves can flake on a loaded
+//! host.
 
 use faer::dyn_stack::{MemBuffer, MemStack};
 use faer::linalg::gevd::{
 	ComputeEigenvectors, GevdParams, gevd_cplx, gevd_scratch,
 };
 use faer::{Mat, Par, c64};
-use std::time::Instant;
 
 struct Lcg(u64);
 impl Lcg {
@@ -70,18 +77,11 @@ fn null_cluster_pencil() -> (Mat<c64>, Mat<c64>, Vec<c64>, usize) {
 	(congruence(&dk), congruence(&dm), want, n_null)
 }
 
-/// eigenvalues and wall time of `gevd_cplx` with the given blocking threshold
-fn solve(
-	a: &Mat<c64>,
-	b: &Mat<c64>,
-	blocking_threshold: Option<usize>,
-) -> (Vec<c64>, f64) {
+/// eigenvalues from `gevd_cplx` with the default (blocked) parameters
+fn solve(a: &Mat<c64>, b: &Mat<c64>) -> Vec<c64> {
 	let n = a.nrows();
 	let (mut a, mut b) = (a.clone(), b.clone());
-	let mut params: GevdParams = <GevdParams as faer::Auto<c64>>::auto();
-	if let Some(t) = blocking_threshold {
-		params.schur.blocking_threshold = t;
-	}
+	let params: GevdParams = <GevdParams as faer::Auto<c64>>::auto();
 	let mut buf = MemBuffer::new(gevd_scratch::<c64>(
 		n,
 		ComputeEigenvectors::No,
@@ -92,7 +92,6 @@ fn solve(
 	let mut alpha = faer::diag::Diag::<c64>::zeros(n);
 	let mut beta = faer::diag::Diag::<c64>::zeros(n);
 	let mut u = Mat::<c64>::zeros(n, n);
-	let start = Instant::now();
 	gevd_cplx(
 		a.as_mut(),
 		b.as_mut(),
@@ -105,16 +104,13 @@ fn solve(
 		params.into(),
 	)
 	.unwrap();
-	let dt = start.elapsed().as_secs_f64();
-	((0..n).map(|i| alpha[i] / beta[i]).collect(), dt)
+	(0..n).map(|i| alpha[i] / beta[i]).collect()
 }
 
 #[test]
-fn blocked_complex_qz_is_accurate_and_not_slower_than_unblocked() {
+fn blocked_complex_qz_is_accurate_on_a_null_cluster_pencil() {
 	let (a, b, mut want, n_null) = null_cluster_pencil();
-	let (got, t_blocked) = solve(&a, &b, None);
-	let (_, t_unblocked) = solve(&a, &b, Some(usize::MAX));
-	eprintln!("blocked {t_blocked:.2} s, unblocked {t_unblocked:.2} s");
+	let got = solve(&a, &b);
 
 	assert!(got.iter().all(|l| l.re.is_finite() && l.im.is_finite()));
 	let null = got.iter().filter(|l| l.norm() < 1e-7).count();
@@ -129,13 +125,4 @@ fn blocked_complex_qz_is_accurate_and_not_slower_than_unblocked() {
 		.map(|(g, w)| (g - w).norm() / w.norm())
 		.fold(0.0, f64::max);
 	assert!(err <= 1e-10, "max relative error vs exact spectrum {err:e}");
-
-	// both solves ran on the same pencil on the same machine, so their ratio
-	// is robust to the host's speed and load. the spinning blocked qz took
-	// 3x to 8x the unblocked one here (depending on host load); the fixed one
-	// takes about 0.7x
-	assert!(
-		t_blocked <= 2.0 * t_unblocked,
-		"blocked qz {t_blocked:.2} s vs unblocked {t_unblocked:.2} s: the deflation-window spin is back"
-	);
 }

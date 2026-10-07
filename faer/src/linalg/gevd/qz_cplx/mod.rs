@@ -1098,6 +1098,14 @@ pub fn hessenberg_to_qz_scratch<T: ComplexField>(
 /// recursion depth at which the deflation window qz switches to the unblocked
 /// algorithm (lapack `xlaqz0`'s `rec >= 2`)
 const MAX_AED_RECURSION: usize = 2;
+#[cfg(all(test, feature = "std"))]
+std::thread_local! {
+	/// iterations run by the blocked qz main loop on this thread, summed over
+	/// all deflation-window recursion levels (test instrumentation for the
+	/// deflation-window spin, geode-fem #908)
+	static BLOCKED_QZ_ITERATIONS: core::cell::Cell<usize> =
+		const { core::cell::Cell::new(0) };
+}
 /// largest deflation window the blocked qz may request for a pencil of
 /// dimension `n`: the recommended window is capped at `(n - 3) / 3`, but an
 /// active block smaller than `nmin` is deflated with a window covering the
@@ -1280,6 +1288,8 @@ fn hessenberg_to_qz_blocked<T: ComplexField>(
 	let nwr = Ord::min(nwr, nw_max);
 	for iter in 0..maxit {
 		_ = iter;
+		#[cfg(all(test, feature = "std"))]
+		BLOCKED_QZ_ITERATIONS.with(|count| count.set(count.get() + 1));
 		if istop == usize::MAX || istart + 1 >= istop {
 			break;
 		}
@@ -1702,5 +1712,104 @@ mod tests {
 				}
 			}
 		}
+	}
+}
+#[cfg(all(test, feature = "std"))]
+mod aed_window_spin_tests {
+	use super::BLOCKED_QZ_ITERATIONS;
+	use crate::linalg::gevd::{
+		ComputeEigenvectors, GevdParams, gevd_cplx, gevd_scratch,
+	};
+	use crate::{Mat, Par, c64};
+	use dyn_stack::{MemBuffer, MemStack};
+
+	struct Lcg(u64);
+	impl Lcg {
+		fn next(&mut self) -> f64 {
+			self.0 = self
+				.0
+				.wrapping_mul(6364136223846793005)
+				.wrapping_add(1442695040888963407);
+			((self.0 >> 11) as f64) / ((1u64 << 53) as f64) - 0.5
+		}
+	}
+
+	/// the 600-row complex-symmetric pencil of
+	/// `tests/fork_qz_aed_window_spin.rs`: `(S^T D_K S, S^T D_M S)` with an
+	/// exact null cluster of `n / 9` eigenvalues, as produced by a Nedelec
+	/// discretization with absorbing layers. 600 rows is above the ~590 where
+	/// the default shift count doubles, which is where the spin started
+	fn null_cluster_pencil(n: usize) -> (Mat<c64>, Mat<c64>) {
+		let n_null = n / 9;
+		let mut rng = Lcg(0x796);
+		let s = Mat::<f64>::from_fn(n, n, |i, j| {
+			(if i == j { 1.0 } else { 0.0 })
+				+ 0.5 * rng.next() / (n as f64).sqrt()
+		});
+		let dk: Vec<c64> = (0..n)
+			.map(|i| {
+				let re = if i < n_null {
+					0.0
+				} else {
+					1.0 + 50.0 * (rng.next() + 0.5)
+				};
+				c64::new(re, 0.0)
+			})
+			.collect();
+		let dm: Vec<c64> = (0..n)
+			.map(|_| c64::new(1.0 + rng.next(), 0.3 * (rng.next() + 0.5)))
+			.collect();
+		let congruence = |d: &[c64]| {
+			let ds = Mat::<c64>::from_fn(n, n, |i, j| d[i] * s[(i, j)]);
+			let st = Mat::<c64>::from_fn(n, n, |i, j| c64::new(s[(j, i)], 0.0));
+			&st * &ds
+		};
+		(congruence(&dk), congruence(&dm))
+	}
+
+	/// geode-fem #908 / #867: the blocked qz capped the whole-block deflation
+	/// window of a small active block at `(n - 3) / 3`, so the window never
+	/// reached the top of the block, no sweep ran and the loop spun on
+	/// deflation windows until it ran out its `30 n` iterations, recursively
+	/// inside every deflation window (which also had no recursion limit). the
+	/// final unblocked qz still produced the right eigenvalues, only several
+	/// times slower, so this counts the blocked-loop iterations instead of
+	/// timing the solve: the count is deterministic (sequential, fixed input)
+	/// and independent of host load
+	#[test]
+	fn blocked_complex_qz_does_not_spin_on_deflation_windows() {
+		let n = 600;
+		let (mut a, mut b) = null_cluster_pencil(n);
+		let params: GevdParams = <GevdParams as crate::Auto<c64>>::auto();
+		let mut buf = MemBuffer::new(gevd_scratch::<c64>(
+			n,
+			ComputeEigenvectors::No,
+			ComputeEigenvectors::No,
+			Par::Seq,
+			params.into(),
+		));
+		let mut alpha = crate::diag::Diag::<c64>::zeros(n);
+		let mut beta = crate::diag::Diag::<c64>::zeros(n);
+		BLOCKED_QZ_ITERATIONS.with(|count| count.set(0));
+		gevd_cplx(
+			a.as_mut(),
+			b.as_mut(),
+			alpha.as_mut(),
+			beta.as_mut(),
+			None,
+			None,
+			Par::Seq,
+			MemStack::new(&mut buf),
+			params.into(),
+		)
+		.unwrap();
+		let iterations = BLOCKED_QZ_ITERATIONS.with(|count| count.get());
+		assert!((0..n).all(|i| (alpha[i] / beta[i]).is_finite()));
+		// 155 iterations with the fix, 20259 without (the top-level loop
+		// alone runs out `30 n = 18000`)
+		assert!(
+			iterations <= 1000,
+			"{iterations} blocked qz iterations: the deflation-window spin is back"
+		);
 	}
 }
