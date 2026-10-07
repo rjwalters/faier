@@ -1,0 +1,36 @@
+# Opens an issue when upstream faer publishes a release tag newer than the
+# fork's base (FORK.md "Upstream base"). Read-only against upstream.
+name: Upstream tag watch
+
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compare newest upstream tag with fork base
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          base=$(awk '/^## Upstream base/{f=1;next} /^## /{f=0} f' FORK.md | grep -oE 'faer-v[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+          latest=$(git ls-remote --tags https://github.com/sarah-quinones/faer-rs.git 'faer-v*' \
+            | sed 's#.*refs/tags/##; s#\^{}##' | grep -E '^faer-v[0-9]+\.[0-9]+\.[0-9]+$' | sort -uV | tail -1)
+          echo "base=$base latest=$latest"
+          if [ -z "$base" ] || [ -z "$latest" ]; then echo "::error::could not read tags"; exit 1; fi
+          if [ "$(printf '%s\n%s\n' "$base" "$latest" | sort -V | tail -1)" = "$base" ]; then
+            echo "Up to date."; exit 0
+          fi
+          title="Sync upstream $latest"
+          existing=$(gh issue list -R "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" --json title -q ".[] | select(.title == \"$title\") | .title")
+          if [ -n "$existing" ]; then echo "Issue already open: $title"; exit 0; fi
+          gh issue create -R "$GITHUB_REPOSITORY" --title "$title" \
+            --body "Upstream published \`$latest\`; the fork is based on \`$base\`. Follow FORK.md \"Syncing upstream\"."
