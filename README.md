@@ -2,7 +2,7 @@
 
 **About this fork.** `faier` is a maintained fork of [faer](https://github.com/sarah-quinones/faer-rs) by Sarah Quiñones, used by [geode-fem](https://github.com/rjwalters/geode-fem) and related projects. Upstream does not accept contributions written with AI assistance. Our development uses AI tools, so fixes we need cannot go upstream, and we carry them here instead.
 
-- **Same API.** The package is named `faier`, but the library name is still `faer`, so existing code keeps `use faer::...`. See [Using faier](#using-faier) below.
+- **Same API, with two sparse-factorization exceptions.** The package is named `faier`, but the library name is still `faer`, so existing code keeps `use faer::...`. `faier` 0.25 is based on faer 0.24.4 and differs from its API in two places: sparse LU's `factorize_symbolic_lu` takes a column-ordering argument (pass `LuColOrdering::Colamd` for faer's behaviour), and sparse QR's `column_counts_ata` takes the matrix `A` instead of its transpose. See [Using faier](#using-faier) below.
 - **Tracks upstream.** The fork follows upstream releases and adds a small set of fixes, each listed in [`FORK.md`](FORK.md) with the issue it resolves.
 - **License and credit.** faer is MIT-licensed. The original copyright, license and third-party notices are retained, and all credit for faer itself belongs to its author.
 - **Report fork bugs here,** at [rjwalters/faier](https://github.com/rjwalters/faier/issues), not upstream.
@@ -13,7 +13,7 @@ Rename the package in your `Cargo.toml` and keep the `faer` dependency key, so y
 
 ```toml
 [dependencies]
-faer = { package = "faier", version = "0.24" }
+faer = { package = "faier", version = "0.25" }
 ```
 
 ```rust

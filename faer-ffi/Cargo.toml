@@ -8,7 +8,7 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-faer = { package = "faier", version = "0.24.5", path = "../faer" }
+faer = { package = "faier", version = "0.25.0", path = "../faer" }
 pastey = "0.2.1"
 
 [build-dependencies]
