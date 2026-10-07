@@ -683,10 +683,17 @@ pub fn generalized_hessenberg<T: ComplexField>(
 				}
 			}
 		} else {
-			zip!(A.rb_mut().get_mut(jcol + 2.., jcol..n - jcol - 2))
-				.for_each(|unzip!(x)| *x = zero());
-			zip!(B.rb_mut().get_mut(jcol + 2.., jcol..n - jcol - 2))
-				.for_each(|unzip!(x)| *x = zero());
+			// clear the rotations stored below the first subdiagonal of the
+			// panel's `nnb` columns (lapack: `xlaset('lower', n - jcol - 2,
+			// nnb, ..., a(jcol + 2, jcol))`). this previously cleared the whole
+			// rectangle `[jcol + 2.., jcol..n - jcol - 2]`, wiping live entries
+			// of the reduced pair whenever `Z` was not requested
+			for k in 0..nnb {
+				zip!(A.rb_mut().get_mut(jcol + 2 + k.., jcol + k))
+					.for_each(|unzip!(x)| *x = zero());
+				zip!(B.rb_mut().get_mut(jcol + 2 + k.., jcol + k))
+					.for_each(|unzip!(x)| *x = zero());
+			}
 		}
 		if top > 0 {
 			for mut M in [A.rb_mut(), B.rb_mut()] {
