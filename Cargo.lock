@@ -842,7 +842,7 @@ dependencies = [
 
 [[package]]
 name = "faier"
-version = "0.24.5"
+version = "0.25.0"
 dependencies = [
  "aligned-vec",
  "amd",

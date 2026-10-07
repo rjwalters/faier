@@ -13,7 +13,7 @@ release = false
 # Publish only when a release PR (branch `release-plz-*`) is merged, never on
 # an ordinary push to main.
 release_always = false
-# 0.x: `feat:` commits bump the patch (0.24.5 -> 0.24.6). Kept explicit
+# 0.x: `feat:` commits bump the patch (0.25.0 -> 0.25.1). Kept explicit
 # because the fork's rule is "patch releases on top of upstream's minor".
 # Breaking changes (`feat!:`, `BREAKING CHANGE:`, or a cargo-semver-checks
 # failure) still propose the next minor; see FORK.md "Releases".
