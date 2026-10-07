@@ -472,6 +472,13 @@ pub(super) fn generalized_eigval_2x2<T: RealField>(
 	}
 	(scale1, scale2, wr1, wr2, wi)
 }
+/// runs the double-shift qz iteration on the active block `ilo..=ihi`
+/// (lapack `dhgeqz`).
+///
+/// returns `Err(ilast)` if the block did not converge within `maxit`
+/// iterations or reached a non-finite iterate. `alphar`/`alphai`/`beta` are
+/// then NaN on `ilo..=ilast` and final above `ilast` (lapack
+/// `info = ilast + 1`)
 fn hessenberg_to_qz_unblocked<T: RealField>(
 	ilo: usize,
 	ihi: usize,
@@ -483,7 +490,8 @@ fn hessenberg_to_qz_unblocked<T: RealField>(
 	alphai: ColMut<'_, T>,
 	beta: ColMut<'_, T>,
 	eigvals_only: bool,
-) {
+	maxit: usize,
+) -> Result<(), usize> {
 	let mut H = A;
 	let mut T = B;
 	let mut Q = Q;
@@ -498,6 +506,7 @@ fn hessenberg_to_qz_unblocked<T: RealField>(
 	let ulp = eps::<T>();
 	let safmin = min_positive::<T>();
 	let safmax = one() / &safmin;
+	let mut info = Ok(());
 	for j in ihi + 1..n {
 		if T[(j, j)] < zero() {
 			if !eigvals_only {
@@ -530,7 +539,6 @@ fn hessenberg_to_qz_unblocked<T: RealField>(
 			ilastm = ihi;
 		}
 		let mut iiter = 0;
-		let maxit = 30 * (ihi + 1 - ilo);
 		let mut eshift = zero();
 		let anorm = H.rb().get(ilo..ihi + 1, ilo..ihi + 1).norm_max();
 		let bnorm = T.rb().get(ilo..ihi + 1, ilo..ihi + 1).norm_max();
@@ -1110,6 +1118,18 @@ fn hessenberg_to_qz_unblocked<T: RealField>(
 				);
 			}
 		}
+		if ilast != usize::MAX && ilast >= ilo {
+			// the loop ran out `maxit` (or stopped at a non-finite iterate)
+			// before `ilo..=ilast` converged: report that block as NaN
+			// eigenvalues, the slots above `ilast` are final (lapack
+			// `dhgeqz`: `info = ilast`, rjwalters/faier#11)
+			for j in ilo..ilast + 1 {
+				alphar[j] = nan();
+				alphai[j] = nan();
+				beta[j] = nan();
+			}
+			info = Err(ilast);
+		}
 	}
 	for j in 0..ilo {
 		if T[(j, j)] < zero() {
@@ -1146,6 +1166,7 @@ fn hessenberg_to_qz_unblocked<T: RealField>(
 			j += 2;
 		}
 	}
+	info
 }
 fn double_shift_sweep<T: RealField>(
 	ascale: T,
@@ -1509,7 +1530,11 @@ fn aed_scratch<T: RealField>(
 	params: GeneralizedSchurParams,
 ) -> StackReq {
 	StackReq::any_of(&[
-		hessenberg_to_qz_blocked_scratch::<T>(nw, rec + 1, par, params),
+		StackReq::all_of(&[
+			linalg::temp_mat_scratch::<T>(nw, nw),
+			linalg::temp_mat_scratch::<T>(nw, nw),
+			hessenberg_to_qz_blocked_scratch::<T>(nw, rec + 1, par, params),
+		]),
 		StackReq::all_of(&[
 			linalg::temp_mat_scratch::<T>(4, 4),
 			linalg::temp_mat_scratch::<T>(4, 4),
@@ -1581,7 +1606,9 @@ pub fn hessenberg_to_qz<T: RealField>(
 	if n == 0 {
 		return;
 	}
-	hessenberg_to_qz_blocked(
+	// non-convergence is reported through NaN eigenvalues for the unconverged
+	// block, which `gevd_real` turns into `GevdError::NoConvergence`
+	_ = hessenberg_to_qz_blocked(
 		0,
 		n - 1,
 		A,
@@ -1596,7 +1623,31 @@ pub fn hessenberg_to_qz<T: RealField>(
 		par,
 		params,
 		stack,
-	)
+	);
+}
+#[cfg(all(test, feature = "std"))]
+std::thread_local! {
+	/// test-only override of the unblocked qz iteration cap on this thread:
+	/// `Some((min_rec, maxit))` caps every unblocked qz run at recursion depth
+	/// `rec >= min_rec` at `maxit` iterations, so tests can force the
+	/// non-convergence that exceptional shifts make rare (rjwalters/faier#11)
+	static UNBLOCKED_MAXIT_OVERRIDE: core::cell::Cell<Option<(usize, usize)>> =
+		const { core::cell::Cell::new(None) };
+}
+/// iteration cap of the unblocked qz on the active block `ilo..=ihi`
+/// (lapack `xhgeqz`'s `maxit = 30 * (ihi - ilo + 1)`), run at aed recursion
+/// depth `rec`
+fn unblocked_maxit(ilo: usize, ihi: usize, rec: usize) -> usize {
+	_ = rec;
+	#[cfg(all(test, feature = "std"))]
+	if let Some((min_rec, maxit)) =
+		UNBLOCKED_MAXIT_OVERRIDE.with(|over| over.get())
+	{
+		if rec >= min_rec {
+			return maxit;
+		}
+	}
+	30 * (ihi + 1 - ilo)
 }
 /// largest deflation window the blocked qz may request for a pencil of
 /// dimension `n`: the recommended window is capped at `(n - 3) / 3` (rounded up
@@ -1622,7 +1673,7 @@ fn hessenberg_to_qz_blocked<T: RealField>(
 	par: Par,
 	params: GeneralizedSchurParams,
 	stack: &mut MemStack,
-) {
+) -> Result<(), usize> {
 	let n = A.nrows();
 	let ulp = eps::<T>();
 	let safmin = min_positive::<T>();
@@ -1648,7 +1699,7 @@ fn hessenberg_to_qz_blocked<T: RealField>(
 	let itemp1 = (itemp1.saturating_sub(1) / 4) * 4 + 4;
 	let nbr = &nsr + &itemp1;
 	if n < nmin || rec >= MAX_AED_RECURSION {
-		hessenberg_to_qz_unblocked(
+		return hessenberg_to_qz_unblocked(
 			ilo,
 			ihi,
 			A.rb_mut(),
@@ -1659,8 +1710,8 @@ fn hessenberg_to_qz_blocked<T: RealField>(
 			alphai.rb_mut(),
 			beta.rb_mut(),
 			eigvals_only,
+			unblocked_maxit(ilo, ihi, rec),
 		);
-		return;
 	}
 	let nw_max = (n - 3) / 3;
 	let nw_max = nw_max + nw_max % 2;
@@ -1681,7 +1732,7 @@ fn hessenberg_to_qz_blocked<T: RealField>(
 			alphar.fill(nan());
 			alphai.fill(nan());
 			beta.fill(nan());
-			return;
+			return Err(ihi);
 		}
 		if A[(istop - 1, istop - 2)].abs()
 			<= smlnum.fmax(
@@ -1858,7 +1909,7 @@ fn hessenberg_to_qz_blocked<T: RealField>(
 				nw = istop + 1 - istart2;
 			}
 		}
-		let (n_undeflated, n_deflated);
+		let (n_undeflated, n_deflated, window_converged);
 		{
 			let (mut QC, stack) =
 				unsafe { linalg::temp_mat_uninit::<T, _, _>(nw, nw, stack) };
@@ -1866,25 +1917,35 @@ fn hessenberg_to_qz_blocked<T: RealField>(
 			let (mut ZC, stack) =
 				unsafe { linalg::temp_mat_uninit::<T, _, _>(nw, nw, stack) };
 			let mut ZC = ZC.as_mat_mut();
-			(n_undeflated, n_deflated) = aggressive_early_deflation(
-				eigvals_only,
-				istart2,
-				istop,
-				nw,
-				A.rb_mut(),
-				B.rb_mut(),
-				Q.rb_mut(),
-				Z.rb_mut(),
-				alphar.rb_mut(),
-				alphai.rb_mut(),
-				beta.rb_mut(),
-				QC.rb_mut(),
-				ZC.rb_mut(),
-				rec,
-				par,
-				params,
-				stack,
-			);
+			(n_undeflated, n_deflated, window_converged) =
+				aggressive_early_deflation(
+					eigvals_only,
+					istart2,
+					istop,
+					nw,
+					A.rb_mut(),
+					B.rb_mut(),
+					Q.rb_mut(),
+					Z.rb_mut(),
+					alphar.rb_mut(),
+					alphai.rb_mut(),
+					beta.rb_mut(),
+					QC.rb_mut(),
+					ZC.rb_mut(),
+					rec,
+					par,
+					params,
+					stack,
+				);
+		}
+		if !window_converged
+			&& (n_undeflated < 2 || istop.wrapping_add(1) - istart2 < nmin)
+		{
+			// the window qz failed and left no shift pair, or the block is too
+			// small for a sweep: nothing changes before the next aed, which
+			// would fail on the same restored window until `maxit` runs out.
+			// let the unblocked qz below finish the block instead
+			break;
 		}
 		if n_deflated > 0 {
 			istop = istop.wrapping_sub(n_deflated);
@@ -1964,7 +2025,8 @@ fn hessenberg_to_qz_blocked<T: RealField>(
 		alphai.rb_mut(),
 		beta.rb_mut(),
 		eigvals_only,
-	);
+		unblocked_maxit(ilo, ihi, rec),
+	)
 }
 fn laqz1<T: RealField>(
 	A: MatRef<'_, T>,
@@ -2235,7 +2297,7 @@ fn aggressive_early_deflation<T: RealField>(
 	par: Par,
 	params: GeneralizedSchurParams,
 	stack: &mut MemStack,
-) -> (usize, usize) {
+) -> (usize, usize, bool) {
 	let n = A.nrows();
 	let zero = zero::<T>;
 	let one = one::<T>;
@@ -2268,22 +2330,50 @@ fn aggressive_early_deflation<T: RealField>(
 		m.fill(zero());
 		m.diagonal_mut().column_vector_mut().fill(one());
 	}
-	hessenberg_to_qz_blocked(
-		0,
-		jw - 1,
-		A.rb_mut().submatrix_mut(kwtop, kwtop, jw, jw),
-		B.rb_mut().submatrix_mut(kwtop, kwtop, jw, jw),
-		Some(qc.rb_mut()),
-		Some(zc.rb_mut()),
-		alphar.rb_mut(),
-		alphai.rb_mut(),
-		beta.rb_mut(),
-		false,
-		rec + 1,
-		par,
-		params,
-		stack,
-	);
+	// the window qz writes its eigenvalues to the window's own slots
+	// `kwtop..=ihi`, where the caller reads the shifts
+	let window_info = {
+		let (mut A_save, stack) =
+			unsafe { linalg::temp_mat_uninit::<T, _, _>(jw, jw, stack) };
+		let mut A_save = A_save.as_mat_mut();
+		let (mut B_save, stack) =
+			unsafe { linalg::temp_mat_uninit::<T, _, _>(jw, jw, stack) };
+		let mut B_save = B_save.as_mat_mut();
+		A_save.copy_from(A.rb().submatrix(kwtop, kwtop, jw, jw));
+		B_save.copy_from(B.rb().submatrix(kwtop, kwtop, jw, jw));
+		let window_info = hessenberg_to_qz_blocked(
+			0,
+			jw - 1,
+			A.rb_mut().submatrix_mut(kwtop, kwtop, jw, jw),
+			B.rb_mut().submatrix_mut(kwtop, kwtop, jw, jw),
+			Some(qc.rb_mut()),
+			Some(zc.rb_mut()),
+			alphar.rb_mut().subrows_mut(kwtop, jw),
+			alphai.rb_mut().subrows_mut(kwtop, jw),
+			beta.rb_mut().subrows_mut(kwtop, jw),
+			false,
+			rec + 1,
+			par,
+			params,
+			stack,
+		);
+		if window_info.is_err() {
+			A.rb_mut()
+				.submatrix_mut(kwtop, kwtop, jw, jw)
+				.copy_from(&A_save);
+			B.rb_mut()
+				.submatrix_mut(kwtop, kwtop, jw, jw)
+				.copy_from(&B_save);
+		}
+		window_info
+	};
+	if let Err(ilast) = window_info {
+		// the window qz did not converge (lapack `dlaqz3`): the window is
+		// restored, nothing is deflated, and the `jw - (ilast + 1)` window
+		// eigenvalues it did converge (slots `kwtop + ilast + 1..=ihi`) are
+		// left as shifts
+		return (jw - (ilast + 1), 0, false);
+	}
 	let mut kwbot;
 	if kwtop == ilo || s == zero() {
 		kwbot = kwtop.wrapping_sub(1);
@@ -2591,7 +2681,7 @@ fn aggressive_early_deflation<T: RealField>(
 		matmul(work.rb_mut(), Accum::Replace, M.rb(), zc.rb(), one(), par);
 		M.copy_from(&work);
 	}
-	(ns, nd)
+	(ns, nd, true)
 }
 fn swap_qz<T: RealField>(
 	mut A: MatMut<'_, T>,
@@ -3699,7 +3789,9 @@ mod tests {
 				alphai.as_mut(),
 				beta.as_mut(),
 				false,
-			);
+				30 * n,
+			)
+			.unwrap();
 			assert!((&Q * &A_clone * Z.adjoint() - &A).norm_max() < 1e-13);
 			assert!((&Q * &B_clone * Z.adjoint() - &B).norm_max() < 1e-13);
 			for j in 0..n {
@@ -3795,7 +3887,8 @@ mod tests {
 							auto!(f64),
 						),
 					)),
-				);
+				)
+				.unwrap();
 				assert!(& Q * & A_clone * Z.adjoint() ~ A);
 				assert!(& Q * & B_clone * Z.adjoint() ~ B);
 				for j in 0..n {
@@ -3815,6 +3908,328 @@ mod tests {
 					}
 					for i in j + 2..n {
 						assert!(B_clone[(i, j)] == 0.0);
+					}
+				}
+			}
+		}
+	}
+}
+/// rjwalters/faier#11: running out `maxit` on finite data must be reported,
+/// and a failed deflation-window qz must not poison the outer qz
+#[cfg(all(test, feature = "std"))]
+mod maxit_exhaustion_tests {
+	use super::{
+		UNBLOCKED_MAXIT_OVERRIDE, hessenberg_to_qz, hessenberg_to_qz_scratch,
+		hessenberg_to_qz_unblocked,
+	};
+	use crate::complex::ComplexFloat;
+	use crate::linalg::evd::ComputeEigenvectors;
+	use crate::linalg::gevd::{
+		GeneralizedSchurParams, GevdError, GevdParams, gevd_real, gevd_scratch,
+	};
+	use crate::{Col, Mat, Par, c64};
+	use dyn_stack::{MemBuffer, MemStack};
+
+	struct Lcg(u64);
+	impl Lcg {
+		fn next(&mut self) -> f64 {
+			self.0 = self
+				.0
+				.wrapping_mul(6364136223846793005)
+				.wrapping_add(1442695040888963407);
+			((self.0 >> 11) as f64) / ((1u64 << 53) as f64) - 0.5
+		}
+	}
+
+	/// caps the unblocked qz at `maxit` iterations at recursion depth
+	/// `>= min_rec` until dropped
+	struct ForceMaxit;
+	impl ForceMaxit {
+		fn new(min_rec: usize, maxit: usize) -> Self {
+			UNBLOCKED_MAXIT_OVERRIDE.with(|o| o.set(Some((min_rec, maxit))));
+			Self
+		}
+	}
+	impl Drop for ForceMaxit {
+		fn drop(&mut self) {
+			UNBLOCKED_MAXIT_OVERRIDE.with(|o| o.set(None));
+		}
+	}
+
+	/// a finite, well-conditioned upper hessenberg / upper triangular pair
+	fn hessenberg_pair(n: usize, seed: u64) -> (Mat<f64>, Mat<f64>) {
+		let mut rng = Lcg(seed);
+		let a = Mat::<f64>::from_fn(n, n, |i, j| {
+			if i <= j + 1 { rng.next() } else { 0.0 }
+		});
+		let b = Mat::<f64>::from_fn(n, n, |i, j| {
+			if i == j {
+				2.0 + rng.next()
+			} else if i < j {
+				rng.next()
+			} else {
+				0.0
+			}
+		});
+		(a, b)
+	}
+
+	/// a finite, well-conditioned dense pair
+	fn dense_pair(n: usize, seed: u64) -> (Mat<f64>, Mat<f64>) {
+		let mut rng = Lcg(seed);
+		let a = Mat::<f64>::from_fn(n, n, |_, _| rng.next());
+		let b = Mat::<f64>::from_fn(n, n, |i, j| {
+			let x = 0.3 * rng.next();
+			if i == j { x + 3.0 } else { x }
+		});
+		(a, b)
+	}
+
+	fn schur_params(blocked_from_15: bool) -> GeneralizedSchurParams {
+		let mut params: GeneralizedSchurParams =
+			<GeneralizedSchurParams as crate::Auto<f64>>::auto();
+		if blocked_from_15 {
+			params.blocking_threshold = 15;
+		}
+		params
+	}
+
+	/// public `hessenberg_to_qz` with schur vectors, returning
+	/// `(alphar, alphai, beta)`
+	fn qz(
+		mut a: Mat<f64>,
+		mut b: Mat<f64>,
+		params: GeneralizedSchurParams,
+	) -> (Col<f64>, Col<f64>, Col<f64>) {
+		let n = a.nrows();
+		let mut q = Mat::<f64>::identity(n, n);
+		let mut z = Mat::<f64>::identity(n, n);
+		let mut alphar = Col::<f64>::zeros(n);
+		let mut alphai = Col::<f64>::zeros(n);
+		let mut beta = Col::<f64>::zeros(n);
+		let mut buf = MemBuffer::new(hessenberg_to_qz_scratch::<f64>(
+			n,
+			Par::Seq,
+			params,
+		));
+		hessenberg_to_qz(
+			a.as_mut(),
+			b.as_mut(),
+			Some(q.as_mut()),
+			Some(z.as_mut()),
+			alphar.as_mut(),
+			alphai.as_mut(),
+			beta.as_mut(),
+			ComputeEigenvectors::Yes,
+			Par::Seq,
+			params,
+			MemStack::new(&mut buf),
+		);
+		(alphar, alphai, beta)
+	}
+
+	/// `gevd_real` (eigenvalues only) with `nmin = 15`
+	fn gevd(mut a: Mat<f64>, mut b: Mat<f64>) -> Result<Vec<c64>, GevdError> {
+		let n = a.nrows();
+		let mut params: GevdParams = <GevdParams as crate::Auto<f64>>::auto();
+		params.schur.blocking_threshold = 15;
+		let mut buf = MemBuffer::new(gevd_scratch::<f64>(
+			n,
+			ComputeEigenvectors::No,
+			ComputeEigenvectors::No,
+			Par::Seq,
+			params.into(),
+		));
+		let mut alphar = crate::diag::Diag::<f64>::zeros(n);
+		let mut alphai = crate::diag::Diag::<f64>::zeros(n);
+		let mut beta = crate::diag::Diag::<f64>::zeros(n);
+		gevd_real(
+			a.as_mut(),
+			b.as_mut(),
+			alphar.as_mut(),
+			alphai.as_mut(),
+			beta.as_mut(),
+			None,
+			None,
+			Par::Seq,
+			MemStack::new(&mut buf),
+			params.into(),
+		)?;
+		Ok((0..n)
+			.map(|i| c64::new(alphar[i] / beta[i], alphai[i] / beta[i]))
+			.collect())
+	}
+
+	/// every eigenvalue in `got` matches a distinct one in `want`
+	fn same_spectrum(got: &[c64], want: &[c64]) -> bool {
+		let mut used = vec![false; want.len()];
+		got.len() == want.len()
+			&& got.iter().all(|&g| {
+				let best =
+					(0..want.len()).filter(|&k| !used[k]).min_by(|&k, &l| {
+						(want[k] - g).abs().total_cmp(&(want[l] - g).abs())
+					});
+				match best {
+					Some(k)
+						if (want[k] - g).abs() <= 1e-8 * (1.0 + g.abs()) =>
+					{
+						used[k] = true;
+						true
+					},
+					_ => false,
+				}
+			})
+	}
+
+	/// a finite pencil whose unblocked qz runs out `maxit` reports the
+	/// unconverged block `0..=ilast` as NaN, and the slots above it keep the
+	/// eigenvalues that did converge (lapack `dhgeqz`: `info = ilast`,
+	/// `alphar(info+1:n)` etc. correct)
+	#[test]
+	fn exhausted_unblocked_qz_reports_nan_for_the_unconverged_block() {
+		for n in [3usize, 4, 5, 7, 8, 20] {
+			let blocked = n >= 15;
+			let (a, b) = hessenberg_pair(n, 0x11 + n as u64);
+			let (ar, ai, be) = qz(a.clone(), b.clone(), schur_params(blocked));
+			let reference: Vec<c64> = (0..n)
+				.map(|i| c64::new(ar[i] / be[i], ai[i] / be[i]))
+				.collect();
+			assert!(reference.iter().all(|x| x.is_finite()));
+			for maxit in [0usize, 1, 2] {
+				let (alphar, alphai, beta) = {
+					let _force = ForceMaxit::new(0, maxit);
+					qz(a.clone(), b.clone(), schur_params(blocked))
+				};
+				let nan = |i: usize| {
+					alphar[i].is_nan() && alphai[i].is_nan() && beta[i].is_nan()
+				};
+				let k = (0..n).take_while(|&i| nan(i)).count();
+				assert!(
+					k >= 1,
+					"n = {n}, maxit = {maxit}: exhaustion not reported: \
+					 alphar = {alphar:?}, alphai = {alphai:?}, beta = {beta:?}"
+				);
+				let converged: Vec<c64> = (k..n)
+					.map(|i| c64::new(alphar[i] / beta[i], alphai[i] / beta[i]))
+					.collect();
+				assert!(
+					converged.iter().all(|x| x.is_finite()),
+					"n = {n}, maxit = {maxit}: converged slots above the \
+					 unconverged block were overwritten: alphar = {alphar:?}"
+				);
+				let mut pool = reference.clone();
+				for x in &converged {
+					let k = (0..pool.len())
+						.min_by(|&k, &l| {
+							(pool[k] - x).abs().total_cmp(&(pool[l] - x).abs())
+						})
+						.unwrap();
+					assert!(
+						(pool[k] - x).abs() <= 1e-8 * (1.0 + x.abs()),
+						"n = {n}, maxit = {maxit}: {x:?} is not an eigenvalue"
+					);
+					pool.swap_remove(k);
+				}
+			}
+		}
+	}
+
+	/// `gevd_real` maps the reported exhaustion to `NoConvergence`, on both
+	/// the unblocked (`n < nmin`) and the blocked (tail call) paths
+	#[test]
+	fn gevd_reports_no_convergence_when_qz_runs_out_maxit() {
+		for n in [5usize, 8, 20, 40] {
+			let (a, b) = dense_pair(n, 0x21 + n as u64);
+			assert!(gevd(a.clone(), b.clone()).is_ok());
+			let _force = ForceMaxit::new(0, 1);
+			let got = gevd(a, b);
+			assert!(
+				matches!(got, Err(GevdError::NoConvergence)),
+				"n = {n}: got {got:?}"
+			);
+		}
+	}
+
+	/// a deflation-window qz that runs out `maxit` neither aborts the
+	/// decomposition nor feeds NaN or stale shifts into the sweep: the window
+	/// is restored (lapack `dlaqz3`) and the outer qz still converges to the
+	/// same eigenvalues
+	#[test]
+	fn failed_deflation_window_qz_is_restored_not_fatal() {
+		for n in [20usize, 40, 64] {
+			let (a, b) = dense_pair(n, 0x31 + n as u64);
+			let reference = gevd(a.clone(), b.clone()).unwrap();
+			for maxit in [0usize, 1, 2, 4, 8] {
+				let _force = ForceMaxit::new(1, maxit);
+				let got = gevd(a.clone(), b.clone());
+				let got = match got {
+					Ok(got) => got,
+					Err(e) => panic!("n = {n}, maxit = {maxit}: {e:?}"),
+				};
+				assert!(
+					same_spectrum(&got, &reference),
+					"n = {n}, maxit = {maxit}: eigenvalues differ from the \
+					 unforced run:\n{got:?}\n{reference:?}"
+				);
+			}
+		}
+	}
+
+	/// the unblocked qz reports the last unconverged index (lapack
+	/// `info - 1`), NaN-fills exactly `ilo..=ilast` and leaves every other
+	/// slot finite, also for `ilo > 0`, odd sizes and `eigvals_only`
+	#[test]
+	fn unblocked_qz_returns_the_last_unconverged_index() {
+		for n in [3usize, 4, 5, 7, 8] {
+			for ilo in [0usize, 1] {
+				for maxit in [0usize, 1, 2, 30 * n] {
+					let (mut a, mut b) = hessenberg_pair(n, 0x41 + n as u64);
+					if ilo > 0 {
+						// `(a, b)` is already split at `ilo`
+						a[(ilo, ilo - 1)] = 0.0;
+					}
+					let mut alphar = Col::<f64>::zeros(n);
+					let mut alphai = Col::<f64>::zeros(n);
+					let mut beta = Col::<f64>::zeros(n);
+					let info = hessenberg_to_qz_unblocked(
+						ilo,
+						n - 1,
+						a.as_mut(),
+						b.as_mut(),
+						None,
+						None,
+						alphar.as_mut(),
+						alphai.as_mut(),
+						beta.as_mut(),
+						true,
+						maxit,
+					);
+					let nan = |i: usize| {
+						alphar[i].is_nan()
+							&& alphai[i].is_nan() && beta[i].is_nan()
+					};
+					let fin = |i: usize| {
+						alphar[i].is_finite()
+							&& alphai[i].is_finite()
+							&& beta[i].is_finite()
+					};
+					let ilast = info.err();
+					if maxit == 30 * n {
+						assert!(ilast.is_none(), "n = {n}, ilo = {ilo}");
+					} else {
+						assert!(
+							ilast.is_some_and(|ilast| ilast >= ilo),
+							"n = {n}, ilo = {ilo}, maxit = {maxit}: {info:?}"
+						);
+					}
+					for i in 0..n {
+						let unconverged = ilast
+							.is_some_and(|ilast| (ilo..ilast + 1).contains(&i));
+						assert!(
+							if unconverged { nan(i) } else { fin(i) },
+							"n = {n}, ilo = {ilo}, maxit = {maxit}, slot {i}, \
+							 info = {info:?}"
+						);
 					}
 				}
 			}

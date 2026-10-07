@@ -391,7 +391,7 @@ fn real_unblocked_qz_fails_fast_on_nonfinite_anywhere_in_the_block() {
 					missed.push(format!(
 						"n = {n}, {poison} at {at:?}: alphar = {:?}, beta = \
 						 {:?}",
-						&alphar, &beta
+						alphar, beta
 					));
 				}
 			}
@@ -423,7 +423,7 @@ fn complex_unblocked_qz_fails_fast_on_nonfinite_anywhere_in_the_block() {
 					missed.push(format!(
 						"n = {n}, {poison} at {at:?}: alpha = {:?}, beta = \
 						 {:?}",
-						&alpha, &beta
+						alpha, beta
 					));
 				}
 			}
