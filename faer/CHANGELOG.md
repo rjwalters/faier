@@ -11,6 +11,14 @@ FORK.md, "Releases"). Upstream faer's history is in the repository's root
 
 ## [Unreleased]
 
+## [0.25.2](https://github.com/rjwalters/faier/compare/v0.25.1...v0.25.2) - 2026-10-08
+
+### Other
+
+- *(gevd)* port upstream ddbd2ae's test attribution
+- *(readme)* absolute links for crates.io, name gevd-313 and the internal Givens fix
+- *(readme)* replace the embedded upstream README with a single fork README
+
 ## [0.25.1](https://github.com/rjwalters/faier/compare/v0.25.0...v0.25.1) - 2026-10-08
 
 ### Other
