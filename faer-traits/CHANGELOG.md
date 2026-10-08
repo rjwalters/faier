@@ -10,6 +10,13 @@ This file covers `faier-traits` releases only and is maintained by release-plz
 
 ## [Unreleased]
 
+## [0.24.2](https://github.com/rjwalters/faier/compare/faier-traits-v0.24.1...faier-traits-v0.24.2) - 2026-10-08
+
+### Other
+
+- *(readme)* absolute links for crates.io, name gevd-313 and the internal Givens fix
+- *(readme)* replace the embedded upstream README with a single fork README
+
 ## [0.24.1](https://github.com/rjwalters/faier/compare/faier-traits-v0.24.0...faier-traits-v0.24.1) - 2026-10-08
 
 ### Other
