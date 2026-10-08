@@ -15,7 +15,7 @@ release = false
 release_always = false
 # 0.x: `feat:` commits bump the patch (0.25.0 -> 0.25.1). Kept explicit
 # because the fork's rule is "patch releases on top of upstream's minor".
-# Breaking changes (`feat!:`, `BREAKING CHANGE:`, or a cargo-semver-checks
+# Breaking changes (`feat!:`, `BREAKING CHANGE:`, or, for faier-traits, a cargo-semver-checks
 # failure) still propose the next minor; see FORK.md "Releases".
 features_always_increment_minor = false
 # Only bump workspace packages in Cargo.lock, not third-party dependencies.
@@ -30,6 +30,15 @@ release = true
 changelog_path = "faer/CHANGELOG.md"
 git_tag_name = "v{{ version }}"
 git_release_name = "v{{ version }}"
+# cargo-semver-checks reports a false break on every faier release: the
+# by-value `PermRef` methods (`as_shape`, `arrays`, `inverse`, `transpose` in
+# faer/src/perm/permref.rs) are matched against the same-named `&self` methods
+# on the owned `Perm`, so it claims "now takes Self, not &Self" even with no
+# code change (first seen on the README-only release after v0.25.0, #37).
+# Disabled for faier only; a real break must be marked in the commit
+# (`feat!:` or a `BREAKING CHANGE:` footer), which still proposes the next
+# minor, and is checked in review.
+semver_check = false
 
 [[package]]
 name = "faier-traits"
