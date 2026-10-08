@@ -10,6 +10,12 @@ This file covers `faier-traits` releases only and is maintained by release-plz
 
 ## [Unreleased]
 
+## [0.24.1](https://github.com/rjwalters/faier/compare/faier-traits-v0.24.0...faier-traits-v0.24.1) - 2026-10-08
+
+### Other
+
+- *(readme)* crates.io and docs.rs badges for faier; drop the pre-release note
+
 ## [0.24.0]
 
 First crates.io release of `faier-traits`: upstream `faer-traits` 0.24.0 (as of
