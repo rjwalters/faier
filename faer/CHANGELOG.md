@@ -11,6 +11,12 @@ FORK.md, "Releases"). Upstream faer's history is in the repository's root
 
 ## [Unreleased]
 
+## [0.25.1](https://github.com/rjwalters/faier/compare/v0.25.0...v0.25.1) - 2026-10-08
+
+### Other
+
+- *(readme)* crates.io and docs.rs badges for faier; drop the pre-release note
+
 ## [0.25.0]
 
 First crates.io release of `faier`, based on upstream `faer-v0.24.4`. It is a
