@@ -1639,6 +1639,7 @@ mod tests {
 	}
 }
 
+// tests by @sjoelund
 #[cfg(test)]
 mod t {
 	use faer::dyn_stack::{MemBuffer, MemStack};
