@@ -1,18 +1,15 @@
-# faier — faer, with AI-assisted fixes
+# faier
 
 [![faier on crates.io](https://img.shields.io/crates/v/faier.svg)](https://crates.io/crates/faier)
 [![faier documentation](https://docs.rs/faier/badge.svg)](https://docs.rs/faier)
 
-**About this fork.** `faier` is a maintained fork of [faer](https://github.com/sarah-quinones/faer-rs) by Sarah Quiñones, used by [geode-fem](https://github.com/rjwalters/geode-fem) and related projects. Upstream does not accept contributions written with AI assistance. Our development uses AI tools, so fixes we need cannot go upstream, and we carry them here instead.
+`faier` is a maintained fork of [faer](https://github.com/sarah-quinones/faer-rs), Sarah Quiñones's pure-Rust linear algebra library, carrying fixes that upstream can't take. It is used by [geode-fem](https://github.com/rjwalters/geode-fem) and related projects.
 
-- **Same API, with two sparse-factorization exceptions.** The package is named `faier`, but the library name is still `faer`, so existing code keeps `use faer::...`. `faier` 0.25 is based on faer 0.24.4 and differs from its API in two places: sparse LU's `factorize_symbolic_lu` takes a column-ordering argument (pass `LuColOrdering::Colamd` for faer's behaviour), and sparse QR's `column_counts_ata` takes the matrix `A` instead of its transpose. See [Using faier](#using-faier) below.
-- **Tracks upstream.** The fork follows upstream releases and adds a small set of fixes, each listed in [`FORK.md`](FORK.md) with the issue it resolves.
-- **License and credit.** faer is MIT-licensed. The original copyright, license and third-party notices are retained, and all credit for faer itself belongs to its author.
-- **Report fork bugs here,** at [rjwalters/faier](https://github.com/rjwalters/faier/issues), not upstream.
+Upstream doesn't accept contributions written with AI assistance. Our development uses AI tools, so the fixes we need are kept here instead. The library is still called `faer`, so code keeps `use faer::...`.
 
 ## Using faier
 
-Rename the package in your `Cargo.toml` and keep the `faer` dependency key, so your code is unchanged:
+Rename the package in your `Cargo.toml` and keep `faer` as the dependency key:
 
 ```toml
 [dependencies]
@@ -40,44 +37,37 @@ faer-traits = { package = "faier-traits", version = "0.24" }
 # faer-traits = { package = "faier-traits", git = "https://github.com/rjwalters/faier" }
 ```
 
-The list of changes this fork carries on top of upstream, each with the issue it resolves, is in [`FORK.md`](FORK.md).
+## What's different from faer
 
-**Citation.** [`CITATION.cff`](CITATION.cff) and [`paper.md`](paper.md) describe upstream faer-rs and credit its author; please cite upstream. This fork is a derivative work.
+`faier` 0.25 is based on faer 0.24.4. It adds:
 
-The upstream README follows. Its badges and documentation links point at the upstream `faer` crate, which does not include this fork's fixes.
+- **Generalized eigenvalues (`gevd`, QZ).** Fixes for an index-overflow panic, wrong (mostly zero) eigenvalues from eigenvalues-only solves above 32 rows, loss of accuracy in the real double-shift bulge chase, and the deflation window spinning on larger problems. Non-finite input and running out of iterations are now reported as `GevdError::NoConvergence` instead of returning meaningless eigenvalues.
+- **Givens rotations in the generalized Hessenberg reduction.** The internal rotation routine used by `gevd` now applies LAPACK's safe scaling (`zlartg`/`dlartg`), so subnormal and extreme-magnitude inputs no longer overflow or lose the complex phase. The public `JacobiRotation::make_givens` is unchanged.
+- **Upstream's unreleased `fix.gevd-313`, cherry-picked.** `gevd_scratch` no longer under-allocates for `n = 2` with eigenvectors, and the eigenvalues-only real QZ writes both slots of a conjugate pair.
+- **Tridiagonal divide and conquer.** The matrix is scaled to unit norm first, so small-norm matrices no longer merge distinct eigenvalues.
+- **Sparse LU column ordering.** `LuColOrdering::{Colamd, Identity, Custom}` lets you supply your own fill-reducing ordering.
 
----
+Two API differences come with the LU change:
 
-<p align="center">
-  <img src="https://faer.veganb.tw/faer-logo-color.png" alt="faer logo"/ width="25%">
-</p>
+- `factorize_symbolic_lu` takes a column-ordering argument. Pass `LuColOrdering::Colamd` for faer's behaviour.
+- Sparse QR's `column_counts_ata` takes the matrix `A` instead of its transpose.
 
-# faer
+Apart from these, the library's behaviour and API match faer 0.24.4. [`FORK.md`](https://github.com/rjwalters/faier/blob/main/FORK.md) lists every change with its regression test and the issue it resolves.
 
-[![upstream faer documentation](https://docs.rs/faer/badge.svg)](https://docs.rs/faer)
-[![upstream faer crate](https://img.shields.io/crates/v/faer.svg)](https://crates.io/crates/faer)
-(upstream `faer`)
+## Versions and releases
 
-`faer` is a rust crate that implements low level linear algebra routines and a high level wrapper for ease of use, in pure rust.
-the aim is to provide a fully featured library for linear algebra with focus on portability, correctness, and performance.
+`faier` follows upstream's minor version and makes patch releases for fork fixes. The 0.25 line is a one-time exception, a minor ahead of faer 0.24 because of the LU API change, and `faier` returns to upstream's numbering from faer 0.26. Releases are published to crates.io by [release-plz](https://release-plz.dev) through crates.io Trusted Publishing. The details are in [`FORK.md`](https://github.com/rjwalters/faier/blob/main/FORK.md#releases); per-release notes are in [`faer/CHANGELOG.md`](https://github.com/rjwalters/faier/blob/main/faer/CHANGELOG.md).
 
-see the upstream [official website](https://faer.veganb.tw) and the upstream [docs.rs](https://docs.rs/faer/latest/faer) documentation for code examples and usage instructions.
+The minimum supported Rust version is 1.84.0.
 
-questions about using the library, contributing, and future directions can be discussed in the [zulip server](https://faer.zulipchat.com).
+## Documentation
 
-# contributing
+API documentation for this fork is on [docs.rs/faier](https://docs.rs/faier). For guides, examples and benchmarks, see upstream's [website](https://faer.veganb.tw) and [benchmark page](https://faer.veganb.tw/benchmarks/). They describe faer, which `faier` matches apart from the differences above.
 
-if you'd like to contribute to `faer`, check out the list of "good first issue"
-issues. these are all (or should be) issues that are suitable for getting
-started, and they generally include a detailed set of instructions for what to
-do. please ask questions on the zulip server or the issue itself if anything
-is unclear!
+## Contributing
 
-# minimum supported rust version
+Report bugs and send pull requests to [rjwalters/faier](https://github.com/rjwalters/faier/issues), not upstream, including bugs that also exist in faer. AI-assisted contributions are welcome here. Each fix should come with a regression test and a row in [`FORK.md`](https://github.com/rjwalters/faier/blob/main/FORK.md).
 
-the current msrv is rust 1.84.0.
+## License and credit
 
-# benchmarks
-
-see [the benchmark page](https://faer.veganb.tw/benchmarks/) on the main website.
-
+`faier` is MIT-licensed, like faer. The original copyright, license and third-party notices (Eigen, LAPACK, SuiteSparse) are kept, and all credit for faer itself belongs to its author. To cite the library, cite upstream faer-rs: [`CITATION.cff`](https://github.com/rjwalters/faier/blob/main/CITATION.cff) and [`paper.md`](https://github.com/rjwalters/faier/blob/main/paper.md) describe it. This fork is a derivative work.
